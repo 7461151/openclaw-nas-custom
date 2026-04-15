@@ -68,9 +68,39 @@ apply_qqbot_model_label_patch() {
   fi
 }
 
+apply_gemini_cli_provider_refresh_patch() {
+  if [ ! -f /usr/local/bin/patch-gemini-cli-provider-refresh.py ]; then
+    log "gemini provider refresh patch script not found; skipping"
+    return 0
+  fi
+
+  if python3 /usr/local/bin/patch-gemini-cli-provider-refresh.py >/tmp/gemini-provider-refresh-patch.out 2>/tmp/gemini-provider-refresh-patch.err; then
+    cat /tmp/gemini-provider-refresh-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  else
+    log "gemini provider refresh patch failed"
+    cat /tmp/gemini-provider-refresh-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  fi
+}
+
+sync_gemini_cli_auth() {
+  if [ ! -f /usr/local/bin/sync-gemini-cli-auth.py ]; then
+    log "gemini auth sync script not found; skipping"
+    return 0
+  fi
+
+  if python3 /usr/local/bin/sync-gemini-cli-auth.py >/tmp/gemini-auth-sync.out 2>/tmp/gemini-auth-sync.err; then
+    cat /tmp/gemini-auth-sync.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  else
+    log "gemini auth sync failed"
+    cat /tmp/gemini-auth-sync.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  fi
+}
+
 start_cups
 configure_printer
 apply_qqbot_model_label_patch
+apply_gemini_cli_provider_refresh_patch
+sync_gemini_cli_auth
 
 if [ "$#" -eq 0 ]; then
   set -- node openclaw.mjs gateway --allow-unconfigured
