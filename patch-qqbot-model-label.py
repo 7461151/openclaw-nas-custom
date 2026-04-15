@@ -4,7 +4,7 @@ import re
 
 DIST_DIR = Path('/app/dist')
 MARKER = 'QQBOT_MODEL_LABEL_PATCH'
-PATCH_VERSION = '2026-04-15.1'
+PATCH_VERSION = '2026-04-15.2'
 BASE_SNIPPETS = [
     'async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef) {',
     'async function sendPlainReply(payload, replyText, event, actx, sendWithRetry, consumeQuoteRef, toolMediaUrls) {',
@@ -13,7 +13,7 @@ BASE_SNIPPETS = [
     'replyOptions: { disableBlockStreaming: account.config.streaming?.mode === "off" }',
 ]
 
-HELPER_BLOCK = '''const QQBOT_MODEL_LABEL_PATCH = "2026-04-15.1";
+HELPER_BLOCK = '''const QQBOT_MODEL_LABEL_PATCH = "2026-04-15.2";
 const OPENCLAW_HOME_DIR = process.env.HOME || "/home/node";
 const OPENCLAW_CONFIG_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "openclaw.json");
 const OPENCLAW_SESSION_STORE_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "agents", "main", "sessions", "sessions.json");
@@ -103,10 +103,10 @@ function inferProviderFromConfiguredModels(cfg, model) {
 function resolveStoredModelRef(entry, cfg) {
 	if (!entry || typeof entry !== "object") return null;
 	const fullRef = firstNestedNormalizedValue(entry, [
-		["modelFull"],
-		["modelRef"],
 		["selectedModelFull"],
 		["selectedModelRef"],
+		["modelFull"],
+		["modelRef"],
 		["deliveryContext", "modelFull"],
 		["deliveryContext", "modelRef"],
 		["deliveryContext", "selectedModelFull"],
@@ -114,26 +114,40 @@ function resolveStoredModelRef(entry, cfg) {
 	]);
 	const parsedFullRef = parseModelRef(fullRef);
 	if (parsedFullRef) return parsedFullRef;
-	const model = firstNestedNormalizedValue(entry, [
-		["model"],
-		["selectedModel"],
+	const overrideModel = firstNestedNormalizedValue(entry, [
 		["modelOverride"],
-		["deliveryContext", "model"],
-		["deliveryContext", "selectedModel"],
 		["deliveryContext", "modelOverride"]
+	]);
+	if (overrideModel) {
+		const parsedOverrideRef = parseModelRef(overrideModel);
+		if (parsedOverrideRef) return parsedOverrideRef;
+		const overrideProvider = firstNestedNormalizedValue(entry, [
+			["providerOverride"],
+			["modelOverrideProvider"],
+			["deliveryContext", "providerOverride"],
+			["deliveryContext", "modelOverrideProvider"]
+		]);
+		return {
+			provider: overrideProvider ?? inferProviderFromConfiguredModels(cfg, overrideModel) ?? "",
+			model: overrideModel
+		};
+	}
+	const model = firstNestedNormalizedValue(entry, [
+		["selectedModel"],
+		["model"],
+		["deliveryContext", "model"],
+		["deliveryContext", "selectedModel"]
 	]);
 	if (!model) return null;
 	const parsedModelRef = parseModelRef(model);
 	if (parsedModelRef) return parsedModelRef;
 	const provider = firstNestedNormalizedValue(entry, [
+		["selectedProvider"],
 		["modelProvider"],
 		["provider"],
-		["selectedProvider"],
-		["modelOverrideProvider"],
 		["deliveryContext", "modelProvider"],
 		["deliveryContext", "provider"],
-		["deliveryContext", "selectedProvider"],
-		["deliveryContext", "modelOverrideProvider"]
+		["deliveryContext", "selectedProvider"]
 	]);
 	return {
 		provider: provider ?? inferProviderFromConfiguredModels(cfg, model) ?? "",

@@ -1,4 +1,5 @@
 ARG BASE_IMAGE=ghcr.io/openclaw/openclaw:latest
+ARG GEMINI_CLI_VERSION=0.38.0
 FROM ${BASE_IMAGE}
 
 USER root
@@ -22,6 +23,8 @@ RUN apt-get update \
     libreoffice-writer \
     libreoffice-calc \
     libreoffice-impress \
+ && npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION} \
+ && gemini --version \
  && sed -i 's/^# *zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen \
  && locale-gen zh_CN.UTF-8 \
  && update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 \
