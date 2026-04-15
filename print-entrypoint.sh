@@ -96,11 +96,38 @@ sync_gemini_cli_auth() {
   fi
 }
 
+start_gemini_auth_sync_loop() {
+  if [ ! -f /usr/local/bin/sync-gemini-cli-auth.py ]; then
+    return 0
+  fi
+
+  interval="${GEMINI_AUTH_SYNC_INTERVAL:-15}"
+  case "$interval" in
+    ''|*[!0-9]*)
+      interval=15
+      ;;
+  esac
+
+  if [ "$interval" -le 0 ] 2>/dev/null; then
+    log "gemini auth sync loop disabled"
+    return 0
+  fi
+
+  (
+    while true; do
+      python3 /usr/local/bin/sync-gemini-cli-auth.py --quiet >/dev/null 2>&1 || true
+      sleep "$interval"
+    done
+  ) &
+  log "gemini auth sync loop started (interval: ${interval}s)"
+}
+
 start_cups
 configure_printer
 apply_qqbot_model_label_patch
 apply_gemini_cli_provider_refresh_patch
 sync_gemini_cli_auth
+start_gemini_auth_sync_loop
 
 if [ "$#" -eq 0 ]; then
   set -- node openclaw.mjs gateway --allow-unconfigured
