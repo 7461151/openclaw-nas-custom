@@ -1,0 +1,23 @@
+services:
+  openclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openclaw-print:latest
+    container_name: openclaw
+    user: "0:0"
+    network_mode: host
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/print-entrypoint.sh"]
+    environment:
+      HOME: /home/node
+      NODE_ENV: production
+      TZ: Asia/Shanghai
+      LANG: zh_CN.UTF-8
+      LANGUAGE: zh_CN:zh
+      LC_ALL: zh_CN.UTF-8
+      PRINTER_NAME: Epson_L6268
+      PRINTER_URI: ipps://192.168.1.234:631/ipp/print
+      PRINTER_PPD: /usr/share/ppd/Epson/epson-inkjet-printer-escpr/Epson-L6260_Series-epson-escpr2-en.ppd.gz
+    volumes:
+      - /volume1/openclaw:/home/node/.openclaw
