@@ -4,7 +4,7 @@ import re
 
 DIST_DIR = Path('/app/dist')
 MARKER = 'QQBOT_MODEL_LABEL_PATCH'
-PATCH_VERSION = '2026-04-15'
+PATCH_VERSION = '2026-04-15.1'
 BASE_SNIPPETS = [
     'async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef) {',
     'async function sendPlainReply(payload, replyText, event, actx, sendWithRetry, consumeQuoteRef, toolMediaUrls) {',
@@ -13,7 +13,7 @@ BASE_SNIPPETS = [
     'replyOptions: { disableBlockStreaming: account.config.streaming?.mode === "off" }',
 ]
 
-HELPER_BLOCK = '''const QQBOT_MODEL_LABEL_PATCH = "2026-04-15";
+HELPER_BLOCK = '''const QQBOT_MODEL_LABEL_PATCH = "2026-04-15.1";
 const OPENCLAW_HOME_DIR = process.env.HOME || "/home/node";
 const OPENCLAW_CONFIG_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "openclaw.json");
 const OPENCLAW_SESSION_STORE_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "agents", "main", "sessions", "sessions.json");
@@ -43,15 +43,31 @@ function parseModelRef(raw) {
 		model: value.slice(slashIndex + 1)
 	};
 }
+function readNestedNormalizedValue(source, path) {
+	let current = source;
+	for (const segment of path) {
+		if (!current || typeof current !== "object") return null;
+		current = current[segment];
+	}
+	return normalizeOptionalString(current);
+}
+function firstNestedNormalizedValue(source, paths) {
+	for (const path of paths) {
+		const value = readNestedNormalizedValue(source, path);
+		if (value) return value;
+	}
+	return null;
+}
 function resolveDefaultModelRef(cfg, agentId) {
 	const agentDefaults = cfg?.agents?.defaults ?? {};
 	const agentCfg = agentId ? cfg?.agents?.[agentId] ?? {} : {};
 	return parseModelRef(agentCfg?.model?.primary) ?? parseModelRef(agentDefaults?.model?.primary);
 }
 function resolveConfiguredModelDisplayName(cfg, provider, model) {
-	const normalizedModel = normalizeOptionalString(model);
+	const parsedModelRef = parseModelRef(model);
+	const normalizedModel = normalizeOptionalString(parsedModelRef?.model ?? model);
 	if (!normalizedModel) return null;
-	const normalizedProvider = normalizeOptionalString(provider) ?? "";
+	const normalizedProvider = normalizeOptionalString(provider) ?? normalizeOptionalString(parsedModelRef?.provider) ?? inferProviderFromConfiguredModels(cfg, normalizedModel) ?? "";
 	const aliasEntry = cfg?.agents?.defaults?.models?.[`${normalizedProvider}/${normalizedModel}`];
 	const alias = normalizeOptionalString(aliasEntry?.alias);
 	if (alias) return alias;
@@ -66,8 +82,10 @@ function resolveConfiguredModelDisplayName(cfg, provider, model) {
 	return normalizedModel;
 }
 function inferProviderFromConfiguredModels(cfg, model) {
-	const normalizedModel = normalizeOptionalString(model);
+	const parsedModelRef = parseModelRef(model);
+	const normalizedModel = normalizeOptionalString(parsedModelRef?.model ?? model);
 	if (!normalizedModel) return null;
+	if (normalizeOptionalString(parsedModelRef?.provider)) return parsedModelRef.provider;
 	const providers = cfg?.models?.providers ?? {};
 	let matchedProvider = null;
 	let matchCount = 0;
@@ -82,23 +100,118 @@ function inferProviderFromConfiguredModels(cfg, model) {
 	}
 	return matchCount === 1 ? matchedProvider : null;
 }
+function resolveStoredModelRef(entry, cfg) {
+	if (!entry || typeof entry !== "object") return null;
+	const fullRef = firstNestedNormalizedValue(entry, [
+		["modelFull"],
+		["modelRef"],
+		["selectedModelFull"],
+		["selectedModelRef"],
+		["deliveryContext", "modelFull"],
+		["deliveryContext", "modelRef"],
+		["deliveryContext", "selectedModelFull"],
+		["deliveryContext", "selectedModelRef"]
+	]);
+	const parsedFullRef = parseModelRef(fullRef);
+	if (parsedFullRef) return parsedFullRef;
+	const model = firstNestedNormalizedValue(entry, [
+		["model"],
+		["selectedModel"],
+		["modelOverride"],
+		["deliveryContext", "model"],
+		["deliveryContext", "selectedModel"],
+		["deliveryContext", "modelOverride"]
+	]);
+	if (!model) return null;
+	const parsedModelRef = parseModelRef(model);
+	if (parsedModelRef) return parsedModelRef;
+	const provider = firstNestedNormalizedValue(entry, [
+		["modelProvider"],
+		["provider"],
+		["selectedProvider"],
+		["modelOverrideProvider"],
+		["deliveryContext", "modelProvider"],
+		["deliveryContext", "provider"],
+		["deliveryContext", "selectedProvider"],
+		["deliveryContext", "modelOverrideProvider"]
+	]);
+	return {
+		provider: provider ?? inferProviderFromConfiguredModels(cfg, model) ?? "",
+		model
+	};
+}
 function resolveReplyModelLabel(sessionKey, cfg, agentId) {
 	const store = readJsonFileSafe(OPENCLAW_SESSION_STORE_FILE) ?? {};
 	const sessionEntry = findSessionEntry(store, sessionKey) ?? {};
 	const mainEntry = findSessionEntry(store, `agent:${agentId || "main"}:main`) ?? findSessionEntry(store, "agent:main:main") ?? {};
 	const config = cfg ?? readJsonFileSafe(OPENCLAW_CONFIG_FILE) ?? {};
 	const defaultRef = resolveDefaultModelRef(config, agentId) ?? {};
-	const provider = normalizeOptionalString(sessionEntry.modelProvider) ?? normalizeOptionalString(sessionEntry.provider) ?? normalizeOptionalString(sessionEntry.deliveryContext?.modelProvider) ?? normalizeOptionalString(mainEntry.modelProvider) ?? normalizeOptionalString(mainEntry.provider) ?? defaultRef.provider ?? "";
-	const model = normalizeOptionalString(sessionEntry.model) ?? normalizeOptionalString(sessionEntry.selectedModel) ?? normalizeOptionalString(sessionEntry.deliveryContext?.model) ?? normalizeOptionalString(mainEntry.model) ?? normalizeOptionalString(mainEntry.selectedModel) ?? defaultRef.model ?? "";
+	const sessionRef = resolveStoredModelRef(sessionEntry, config);
+	const mainRef = resolveStoredModelRef(mainEntry, config);
+	const provider = sessionRef?.provider ?? mainRef?.provider ?? defaultRef.provider ?? "";
+	const model = sessionRef?.model ?? mainRef?.model ?? defaultRef.model ?? "";
 	if (!model) return null;
 	return resolveConfiguredModelDisplayName(config, provider, model);
 }
+function resolveRuntimeModelRef(cfg, selection) {
+	const config = cfg ?? readJsonFileSafe(OPENCLAW_CONFIG_FILE) ?? {};
+	const fullRef = firstNestedNormalizedValue(selection, [
+		["modelFull"],
+		["modelRef"],
+		["selectedModelFull"],
+		["selectedModelRef"],
+		["fullModel"],
+		["primaryModel"],
+		["primaryModelRef"],
+		["agentMeta", "modelFull"],
+		["meta", "agentMeta", "modelFull"],
+		["meta", "modelFull"]
+	]);
+	const parsedFullRef = parseModelRef(fullRef);
+	if (parsedFullRef) return parsedFullRef;
+	const model = firstNestedNormalizedValue(selection, [
+		["model"],
+		["modelId"],
+		["selectedModel"],
+		["selectedModelId"],
+		["modelName"],
+		["id"],
+		["name"],
+		["agentMeta", "model"],
+		["meta", "agentMeta", "model"],
+		["meta", "model"],
+		["selection", "model"],
+		["selection", "modelId"],
+		["current", "model"],
+		["current", "modelId"]
+	]);
+	if (!model) return null;
+	const parsedModelRef = parseModelRef(model);
+	if (parsedModelRef) return parsedModelRef;
+	const provider = firstNestedNormalizedValue(selection, [
+		["provider"],
+		["providerId"],
+		["modelProvider"],
+		["selectedProvider"],
+		["selectedModelProvider"],
+		["agentMeta", "provider"],
+		["meta", "agentMeta", "provider"],
+		["meta", "provider"],
+		["selection", "provider"],
+		["selection", "providerId"],
+		["current", "provider"],
+		["current", "providerId"]
+	]);
+	return {
+		provider: provider ?? inferProviderFromConfiguredModels(config, model) ?? "",
+		model
+	};
+}
 function resolveRuntimeReplyModelLabel(cfg, selection) {
 	const config = cfg ?? readJsonFileSafe(OPENCLAW_CONFIG_FILE) ?? {};
-	const model = normalizeOptionalString(selection?.model);
-	if (!model) return null;
-	const provider = normalizeOptionalString(selection?.provider) ?? inferProviderFromConfiguredModels(config, model) ?? "";
-	return resolveConfiguredModelDisplayName(config, provider, model);
+	const runtimeRef = resolveRuntimeModelRef(config, selection);
+	if (!runtimeRef?.model) return null;
+	return resolveConfiguredModelDisplayName(config, runtimeRef.provider, runtimeRef.model);
 }
 function buildModelReplyHeader(modelLabel) {
 	const normalized = normalizeOptionalString(modelLabel);
@@ -198,7 +311,7 @@ def patch_once(text: str) -> str:
         text,
         '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\ttry {',
         '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\tlet leadingModelHeader = "";\n\tif (imageUrls.length > 0) {\n\t\tconst trimmedResult = result.trimStart();\n\t\tif (trimmedResult.startsWith("\\u3010")) {\n\t\t\tconst headerEnd = trimmedResult.indexOf("\\u3011");\n\t\t\tif (headerEnd > 0 && headerEnd <= 61) {\n\t\t\t\tleadingModelHeader = trimmedResult.slice(0, headerEnd + 1);\n\t\t\t\tresult = trimmedResult.slice(headerEnd + 1).trimStart();\n\t\t\t}\n\t\t}\n\t}\n\tif (leadingModelHeader) {\n\t\tawait sendQQBotTextChunksWithRetry({\n\t\t\taccount,\n\t\t\tevent,\n\t\t\tchunks: chunkText(leadingModelHeader, TEXT_CHUNK_LIMIT),\n\t\t\tsendWithRetry,\n\t\t\tconsumeQuoteRef,\n\t\t\tallowDm: false,\n\t\t\tlog,\n\t\t\tonSuccess: (chunk) => `${prefix} Sent model header chunk (${chunk.length} chars) (${event.type})`,\n\t\t\tonError: (err) => `${prefix} Failed to send model header: ${String(err)}`\n\t\t});\n\t}\n\ttry {',
-        'const leadingModelHeaderMatch = imageUrls.length > 0 ? result.match',
+        'let leadingModelHeader = "";',
         'sendPlainTextReply',
     )
 
