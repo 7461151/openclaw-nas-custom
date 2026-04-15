@@ -68,6 +68,20 @@ apply_qqbot_model_label_patch() {
   fi
 }
 
+apply_control_ui_delivery_model_patch() {
+  if [ ! -f /usr/local/bin/patch-control-ui-delivery-model.py ]; then
+    log "control-ui delivery model patch script not found; skipping"
+    return 0
+  fi
+
+  if python3 /usr/local/bin/patch-control-ui-delivery-model.py >/tmp/control-ui-delivery-model-patch.out 2>/tmp/control-ui-delivery-model-patch.err; then
+    cat /tmp/control-ui-delivery-model-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  else
+    log "control-ui delivery model patch failed"
+    cat /tmp/control-ui-delivery-model-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  fi
+}
+
 apply_gemini_cli_provider_refresh_patch() {
   if [ ! -f /usr/local/bin/patch-gemini-cli-provider-refresh.py ]; then
     log "gemini provider refresh patch script not found; skipping"
@@ -125,6 +139,7 @@ start_gemini_auth_sync_loop() {
 start_cups
 configure_printer
 apply_qqbot_model_label_patch
+apply_control_ui_delivery_model_patch
 apply_gemini_cli_provider_refresh_patch
 sync_gemini_cli_auth
 start_gemini_auth_sync_loop

@@ -32,6 +32,7 @@ RUN apt-get update \
 
 COPY patch-qqbot-heartbeat.py /tmp/patch-qqbot-heartbeat.py
 COPY patch-qqbot-model-label.py /usr/local/bin/patch-qqbot-model-label.py
+COPY patch-control-ui-delivery-model.py /usr/local/bin/patch-control-ui-delivery-model.py
 COPY patch-gemini-cli-provider-refresh.py /usr/local/bin/patch-gemini-cli-provider-refresh.py
 COPY sync-gemini-cli-auth.py /usr/local/bin/sync-gemini-cli-auth.py
 COPY gemini-wrapper.sh /tmp/gemini-wrapper.sh
@@ -45,4 +46,4 @@ COPY Epson-L6260_Series-epson-escpr2-en.ppd.gz /usr/share/ppd/Epson/epson-inkjet
 COPY print-entrypoint.sh /usr/local/bin/print-entrypoint.sh
 RUN rm -f /usr/local/bin/gemini \
  && mv /tmp/gemini-wrapper.sh /usr/local/bin/gemini \
- && chmod +x /usr/local/bin/gemini /usr/local/bin/lp /usr/local/bin/print-entrypoint.sh /usr/local/bin/patch-gemini-cli-provider-refresh.py /usr/local/bin/sync-gemini-cli-auth.py
+ && chmod +x /usr/local/bin/gemini /usr/local/bin/lp /usr/local/bin/print-entrypoint.sh /usr/local/bin/patch-control-ui-delivery-model.py /usr/local/bin/patch-gemini-cli-provider-refresh.py /usr/local/bin/sync-gemini-cli-auth.py
