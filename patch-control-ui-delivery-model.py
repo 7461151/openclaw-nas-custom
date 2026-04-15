@@ -5,7 +5,7 @@ import re
 import sys
 
 MARKER = "OPENCLAW_DELIVERY_MIRROR_UI_PATCH"
-PATCH_VERSION = "2026-04-15.1"
+PATCH_VERSION = "2026-04-16.1"
 DEFAULT_ASSETS_DIR = Path("/app/dist/control-ui/assets")
 
 OLD_SNIPPET = (
@@ -21,15 +21,17 @@ OLD_SNIPPET = (
 
 NEW_SNIPPET = (
     f"const {MARKER}=`{PATCH_VERSION}`;"
-    "function pT(e){if(!e||typeof e!=`object`)return!1;let t=typeof e.provider==`string`?"
-    "O(e.provider):``,n=typeof e.model==`string`?O(e.model):``;return n===`delivery-mirror`&&"
-    "(t===``||t===`openclaw`)}"
-    "function mT(e){return typeof e.model==`string`&&e.model!==`gateway-injected`&&!pT(e)}"
+    "function openclawDeliveryMirrorUiIsSyntheticAssistantMessage(e){if(!e||typeof e!=`object`)return!1;"
+    "let t=typeof e.provider==`string`?O(e.provider):``,n=typeof e.model==`string`?O(e.model):``;"
+    "return n===`delivery-mirror`&&(t===``||t===`openclaw`)}"
+    "function openclawDeliveryMirrorUiHasDisplayableModel(e){return typeof e.model==`string`&&"
+    "e.model!==`gateway-injected`&&!openclawDeliveryMirrorUiIsSyntheticAssistantMessage(e)}"
     "function gT(e,t){let n=0,r=0,i=0,a=0,o=0,s=null,c=!1;for(let{message:t}of e.messages)"
     "{let e=t;if(e.role!==`assistant`)continue;let l=e.usage;l&&(c=!0,n+=l.input??l.inputTokens??0,"
     "r+=l.output??l.outputTokens??0,i+=l.cacheRead??l.cache_read_input_tokens??0,"
     "a+=l.cacheWrite??l.cache_creation_input_tokens??0);let u=e.cost;u?.total&&(o+=u.total),"
-    "mT(e)&&(s=e.model)}if(!c&&!s)return null;let l=t&&n>0?Math.min(Math.round(n/t*100),100):null;"
+    "openclawDeliveryMirrorUiHasDisplayableModel(e)&&(s=e.model)}if(!c&&!s)return null;"
+    "let l=t&&n>0?Math.min(Math.round(n/t*100),100):null;"
     "return{input:n,output:r,cacheRead:i,cacheWrite:a,cost:o,model:s,contextPercent:l}}"
 )
 
@@ -70,7 +72,7 @@ def find_target_file(assets_dir: Path) -> Path:
 def patch_text(text: str) -> str:
     if MARKER in text:
         pattern = re.compile(
-            rf"const {MARKER}=`.*?`;function pT\(e\)\{{.*?function gT\(e,t\)\{{.*?return\{{input:n,output:r,cacheRead:i,cacheWrite:a,cost:o,model:s,contextPercent:l\}}\}}",
+            rf"const {MARKER}=`.*?`;.*?function gT\(e,t\)\{{.*?return\{{input:n,output:r,cacheRead:i,cacheWrite:a,cost:o,model:s,contextPercent:l\}}\}}",
             re.S,
         )
         if not pattern.search(text):
