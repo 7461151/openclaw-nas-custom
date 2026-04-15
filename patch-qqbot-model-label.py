@@ -296,6 +296,31 @@ def replace_once_if_needed(text: str, old: str, new: str, marker: str, name: str
 
 def patch_once(text: str) -> str:
     text = ensure_helper_block(text)
+    has_routed_session_key = 'const routedSessionKey = event.type === "c2c" ?' in text
+    session_key_expr = "routedSessionKey" if has_routed_session_key else "route.sessionKey"
+    duplicate_current_model_pattern = re.compile(
+        r'(?m)^([ \t]*)let currentModelLabel = resolveReplyModelLabel\(routedSessionKey, cfg, route\.agentId\);\n'
+        r'\1const updateCurrentModelLabel = \(selection\) => \{\n'
+        r'\1\tconst runtimeModelLabel = resolveRuntimeReplyModelLabel\(cfg, selection\);\n'
+        r'\1\tif \(runtimeModelLabel\) currentModelLabel = runtimeModelLabel;\n'
+        r'\1\};\n'
+        r'\1let currentModelLabel = resolveReplyModelLabel\(route\.sessionKey, cfg, route\.agentId\);\n'
+        r'\1const updateCurrentModelLabel = \(selection\) => \{\n'
+        r'\1\tconst runtimeModelLabel = resolveRuntimeReplyModelLabel\(cfg, selection\);\n'
+        r'\1\tif \(runtimeModelLabel\) currentModelLabel = runtimeModelLabel;\n'
+        r'\1\};\n'
+    )
+    text = duplicate_current_model_pattern.sub(
+        lambda m: (
+            f"{m.group(1)}let currentModelLabel = resolveReplyModelLabel(routedSessionKey, cfg, route.agentId);\n"
+            f"{m.group(1)}const updateCurrentModelLabel = (selection) => {{\n"
+            f"{m.group(1)}\tconst runtimeModelLabel = resolveRuntimeReplyModelLabel(cfg, selection);\n"
+            f"{m.group(1)}\tif (runtimeModelLabel) currentModelLabel = runtimeModelLabel;\n"
+            f"{m.group(1)}}};\n"
+        ),
+        text,
+        count=1,
+    )
 
     text = replace_once_if_needed(
         text,
@@ -329,14 +354,14 @@ def patch_once(text: str) -> str:
         'sendPlainTextReply',
     )
 
-    if 'let currentModelLabel = resolveReplyModelLabel(route.sessionKey, cfg, route.agentId);' not in text:
+    if 'let currentModelLabel = resolveReplyModelLabel(' not in text:
         pattern = re.compile(r'(?m)^([ \t]*)const dispatchPromise = pluginRuntime\.channel\.reply\.dispatchReplyWithBufferedBlockDispatcher\(\{')
         match = pattern.search(text)
         if not match:
             raise RuntimeError('dispatchPromise anchor missing')
         indent = match.group(1)
         injection = (
-            f"{indent}let currentModelLabel = resolveReplyModelLabel(route.sessionKey, cfg, route.agentId);\n"
+            f"{indent}let currentModelLabel = resolveReplyModelLabel({session_key_expr}, cfg, route.agentId);\n"
             f"{indent}const updateCurrentModelLabel = (selection) => {{\n"
             f"{indent}\tconst runtimeModelLabel = resolveRuntimeReplyModelLabel(cfg, selection);\n"
             f"{indent}\tif (runtimeModelLabel) currentModelLabel = runtimeModelLabel;\n"
@@ -345,17 +370,42 @@ def patch_once(text: str) -> str:
         )
         text = pattern.sub(lambda m: injection, text, count=1)
 
-    old_deliver = 'const modelLabel = resolveReplyModelLabel(route.sessionKey, cfg, route.agentId);\n\t\t\t\t\t\t\t\tconst deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel\n\t\t\t\t\t\t\t\t};'
-    new_deliver = 'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};'
+    old_deliver_variants = [
+        (
+            'const modelLabel = resolveReplyModelLabel(route.sessionKey, cfg, route.agentId);\n\t\t\t\t\t\t\t\tconst deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel\n\t\t\t\t\t\t\t\t};',
+            'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
+        ),
+        (
+            'const modelLabel = resolveReplyModelLabel(routedSessionKey, cfg, route.agentId);\n\t\t\t\t\t\t\t\tconst deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel\n\t\t\t\t\t\t\t\t};',
+            'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
+        ),
+    ]
     if 'modelLabel: currentModelLabel' not in text:
-        if old_deliver in text:
-            text = text.replace(old_deliver, new_deliver, 1)
+        for old_deliver, new_deliver in old_deliver_variants:
+            if old_deliver in text:
+                text = text.replace(old_deliver, new_deliver, 1)
+                break
         else:
-            base_deliver = 'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog\n\t\t\t\t\t\t\t\t};'
-            upgraded_deliver = 'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};'
-            if base_deliver not in text:
+            base_deliver_variants = [
+                (
+                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog\n\t\t\t\t\t\t\t\t};',
+                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
+                ),
+                (
+                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey\n\t\t\t\t\t\t\t\t};',
+                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
+                ),
+                (
+                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey\n\t\t\t\t\t\t\t\t};',
+                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
+                ),
+            ]
+            for base_deliver, upgraded_deliver in base_deliver_variants:
+                if base_deliver in text:
+                    text = text.replace(base_deliver, upgraded_deliver, 1)
+                    break
+            else:
                 raise RuntimeError('deliverActx anchor missing')
-            text = text.replace(base_deliver, upgraded_deliver, 1)
 
     if 'onModelSelected: (selection) => {' not in text:
         old_reply_options = 'replyOptions: { disableBlockStreaming: account.config.streaming?.mode === "off" }'
