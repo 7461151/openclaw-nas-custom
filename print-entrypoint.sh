@@ -96,6 +96,20 @@ apply_qqbot_delivery_mirror_session_patch() {
   fi
 }
 
+apply_qqbot_outbound_mirror_route_patch() {
+  if [ ! -f /usr/local/bin/patch-qqbot-outbound-mirror-route.py ]; then
+    log "qqbot outbound mirror route patch script not found; skipping"
+    return 0
+  fi
+
+  if python3 /usr/local/bin/patch-qqbot-outbound-mirror-route.py >/tmp/qqbot-outbound-mirror-route-patch.out 2>/tmp/qqbot-outbound-mirror-route-patch.err; then
+    cat /tmp/qqbot-outbound-mirror-route-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  else
+    log "qqbot outbound mirror route patch failed"
+    cat /tmp/qqbot-outbound-mirror-route-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  fi
+}
+
 reconcile_qqbot_c2c_legacy_sessions() {
   if [ ! -f /usr/local/bin/reconcile-qqbot-c2c-legacy-sessions.py ]; then
     log "qqbot c2c legacy session reconcile script not found; skipping"
@@ -183,6 +197,7 @@ configure_printer
 apply_qqbot_model_label_patch
 apply_qqbot_c2c_direct_session_patch
 apply_qqbot_delivery_mirror_session_patch
+apply_qqbot_outbound_mirror_route_patch
 reconcile_qqbot_c2c_legacy_sessions
 apply_control_ui_delivery_model_patch
 apply_gemini_cli_provider_refresh_patch
