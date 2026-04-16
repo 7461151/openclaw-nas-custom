@@ -8,6 +8,8 @@ RUN apt-get update \
     ffmpeg \
     python3 \
     python3-pil \
+    openssh-client \
+    sshpass \
     locales \
     fonts-noto-cjk \
     fonts-wqy-zenhei \

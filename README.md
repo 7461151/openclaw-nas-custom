@@ -10,6 +10,7 @@ It keeps the current NAS customizations:
 - QQ private-chat direct-session routing
 - QQ private-chat delivery mirror session normalization
 - QQ private-chat inbound transcript mirroring
+- password-based SSH automation support (`sshpass`)
 - printer bootstrap entrypoint
 - Chinese locale and required print/document packages
 
@@ -58,6 +59,8 @@ If your NAS container manager supports "redeploy + pull latest image", that is e
 
 The default QQ reply timeout in this image is `240000` ms (`240` seconds).
 You can adjust it with the `QQBOT_RESPONSE_TIMEOUT_MS` environment variable.
+
+The image also includes `sshpass`, so tasks inside the container can automate password-based SSH when a key is not available.
 
 ## First-Time NAS Switch
 
