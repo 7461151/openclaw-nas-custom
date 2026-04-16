@@ -82,6 +82,34 @@ apply_qqbot_c2c_direct_session_patch() {
   fi
 }
 
+apply_qqbot_delivery_mirror_session_patch() {
+  if [ ! -f /usr/local/bin/patch-qqbot-delivery-mirror-session.py ]; then
+    log "qqbot delivery mirror session patch script not found; skipping"
+    return 0
+  fi
+
+  if python3 /usr/local/bin/patch-qqbot-delivery-mirror-session.py >/tmp/qqbot-delivery-mirror-session-patch.out 2>/tmp/qqbot-delivery-mirror-session-patch.err; then
+    cat /tmp/qqbot-delivery-mirror-session-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  else
+    log "qqbot delivery mirror session patch failed"
+    cat /tmp/qqbot-delivery-mirror-session-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  fi
+}
+
+reconcile_qqbot_c2c_legacy_sessions() {
+  if [ ! -f /usr/local/bin/reconcile-qqbot-c2c-legacy-sessions.py ]; then
+    log "qqbot c2c legacy session reconcile script not found; skipping"
+    return 0
+  fi
+
+  if python3 /usr/local/bin/reconcile-qqbot-c2c-legacy-sessions.py >/tmp/qqbot-c2c-legacy-reconcile.out 2>/tmp/qqbot-c2c-legacy-reconcile.err; then
+    cat /tmp/qqbot-c2c-legacy-reconcile.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  else
+    log "qqbot c2c legacy session reconcile failed"
+    cat /tmp/qqbot-c2c-legacy-reconcile.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  fi
+}
+
 apply_control_ui_delivery_model_patch() {
   if [ ! -f /usr/local/bin/patch-control-ui-delivery-model.py ]; then
     log "control-ui delivery model patch script not found; skipping"
@@ -154,6 +182,8 @@ start_cups
 configure_printer
 apply_qqbot_model_label_patch
 apply_qqbot_c2c_direct_session_patch
+apply_qqbot_delivery_mirror_session_patch
+reconcile_qqbot_c2c_legacy_sessions
 apply_control_ui_delivery_model_patch
 apply_gemini_cli_provider_refresh_patch
 sync_gemini_cli_auth
