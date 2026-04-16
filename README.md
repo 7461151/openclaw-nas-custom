@@ -7,6 +7,7 @@ It keeps the current NAS customizations:
 - QQBot heartbeat patch
 - QQ reply model-name prefix patch
 - QQ private-chat delivery mirror session normalization
+- QQ private-chat inbound transcript mirroring
 - QQ private-chat legacy `group:c2c` session reconciliation
 - printer bootstrap entrypoint
 - Chinese locale and required print/document packages
@@ -29,6 +30,7 @@ The image is published to:
 - `print-entrypoint.sh`: printer setup and runtime patch bootstrap
 - `patch-qqbot-model-label.py`: runtime QQ model-label patch
 - `patch-qqbot-delivery-mirror-session.py`: runtime QQ private-chat mirror session normalization
+- `patch-qqbot-inbound-transcript-mirror.py`: runtime QQ private-chat inbound transcript mirroring
 - `patch-qqbot-heartbeat.py`: heartbeat patch
 - `reconcile-qqbot-c2c-legacy-sessions.py`: startup cleanup for stale QQ private-chat legacy session keys
 
