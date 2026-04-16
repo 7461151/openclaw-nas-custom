@@ -1,5 +1,4 @@
 ARG BASE_IMAGE=ghcr.io/openclaw/openclaw:latest
-ARG GEMINI_CLI_VERSION=0.38.0
 FROM ${BASE_IMAGE}
 
 USER root
@@ -23,8 +22,6 @@ RUN apt-get update \
     libreoffice-writer \
     libreoffice-calc \
     libreoffice-impress \
- && npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION} \
- && gemini --version \
  && sed -i 's/^# *zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen \
  && locale-gen zh_CN.UTF-8 \
  && update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 \
@@ -37,11 +34,6 @@ COPY patch-qqbot-c2c-direct-session.py /usr/local/bin/patch-qqbot-c2c-direct-ses
 COPY patch-qqbot-delivery-mirror-session.py /usr/local/bin/patch-qqbot-delivery-mirror-session.py
 COPY patch-qqbot-outbound-mirror-route.py /usr/local/bin/patch-qqbot-outbound-mirror-route.py
 COPY patch-qqbot-inbound-transcript-mirror.py /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py
-COPY patch-control-ui-delivery-model.py /usr/local/bin/patch-control-ui-delivery-model.py
-COPY patch-gemini-cli-provider-refresh.py /usr/local/bin/patch-gemini-cli-provider-refresh.py
-COPY reconcile-qqbot-c2c-legacy-sessions.py /usr/local/bin/reconcile-qqbot-c2c-legacy-sessions.py
-COPY sync-gemini-cli-auth.py /usr/local/bin/sync-gemini-cli-auth.py
-COPY gemini-wrapper.sh /tmp/gemini-wrapper.sh
 RUN python3 /tmp/patch-qqbot-heartbeat.py && rm -f /tmp/patch-qqbot-heartbeat.py
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
@@ -50,6 +42,4 @@ ENV LC_ALL=zh_CN.UTF-8
 COPY lp /usr/local/bin/lp
 COPY Epson-L6260_Series-epson-escpr2-en.ppd.gz /usr/share/ppd/Epson/epson-inkjet-printer-escpr/Epson-L6260_Series-epson-escpr2-en.ppd.gz
 COPY print-entrypoint.sh /usr/local/bin/print-entrypoint.sh
-RUN rm -f /usr/local/bin/gemini \
- && mv /tmp/gemini-wrapper.sh /usr/local/bin/gemini \
- && chmod +x /usr/local/bin/gemini /usr/local/bin/lp /usr/local/bin/print-entrypoint.sh /usr/local/bin/patch-qqbot-response-timeout.py /usr/local/bin/patch-qqbot-c2c-direct-session.py /usr/local/bin/patch-qqbot-delivery-mirror-session.py /usr/local/bin/patch-qqbot-outbound-mirror-route.py /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py /usr/local/bin/patch-control-ui-delivery-model.py /usr/local/bin/patch-gemini-cli-provider-refresh.py /usr/local/bin/reconcile-qqbot-c2c-legacy-sessions.py /usr/local/bin/sync-gemini-cli-auth.py
+RUN chmod +x /usr/local/bin/lp /usr/local/bin/print-entrypoint.sh /usr/local/bin/patch-qqbot-response-timeout.py /usr/local/bin/patch-qqbot-c2c-direct-session.py /usr/local/bin/patch-qqbot-delivery-mirror-session.py /usr/local/bin/patch-qqbot-outbound-mirror-route.py /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py
