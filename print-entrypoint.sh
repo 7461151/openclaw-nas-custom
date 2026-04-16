@@ -68,6 +68,20 @@ apply_qqbot_model_label_patch() {
   fi
 }
 
+apply_qqbot_response_timeout_patch() {
+  if [ ! -f /usr/local/bin/patch-qqbot-response-timeout.py ]; then
+    log "qqbot response timeout patch script not found; skipping"
+    return 0
+  fi
+
+  if python3 /usr/local/bin/patch-qqbot-response-timeout.py >/tmp/qqbot-response-timeout-patch.out 2>/tmp/qqbot-response-timeout-patch.err; then
+    cat /tmp/qqbot-response-timeout-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  else
+    log "qqbot response timeout patch failed"
+    cat /tmp/qqbot-response-timeout-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
+  fi
+}
+
 apply_qqbot_c2c_direct_session_patch() {
   if [ ! -f /usr/local/bin/patch-qqbot-c2c-direct-session.py ]; then
     log "qqbot c2c direct session patch script not found; skipping"
@@ -208,6 +222,7 @@ start_gemini_auth_sync_loop() {
 
 start_cups
 configure_printer
+apply_qqbot_response_timeout_patch
 apply_qqbot_model_label_patch
 apply_qqbot_c2c_direct_session_patch
 apply_qqbot_delivery_mirror_session_patch

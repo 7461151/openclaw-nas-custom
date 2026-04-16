@@ -5,6 +5,7 @@ This repository publishes a custom OpenClaw image for NAS use.
 It keeps the current NAS customizations:
 
 - QQBot heartbeat patch
+- QQ reply timeout patch
 - QQ reply model-name prefix patch
 - QQ private-chat delivery mirror session normalization
 - QQ private-chat inbound transcript mirroring
@@ -28,6 +29,7 @@ The image is published to:
 - `docker-compose.yaml`: NAS deployment file using the published GHCR image
 - `compose.build.local.yaml`: original local-build compose file for debugging
 - `print-entrypoint.sh`: printer setup and runtime patch bootstrap
+- `patch-qqbot-response-timeout.py`: runtime QQ reply-timeout patch
 - `patch-qqbot-model-label.py`: runtime QQ model-label patch
 - `patch-qqbot-delivery-mirror-session.py`: runtime QQ private-chat mirror session normalization
 - `patch-qqbot-inbound-transcript-mirror.py`: runtime QQ private-chat inbound transcript mirroring
@@ -45,6 +47,9 @@ docker compose up -d
 ```
 
 If your NAS container manager supports "redeploy + pull latest image", that is enough after switching to this `docker-compose.yaml`.
+
+The default QQ reply timeout in this image is `240000` ms (`240` seconds).
+You can adjust it with the `QQBOT_RESPONSE_TIMEOUT_MS` environment variable.
 
 ## First-Time NAS Switch
 
