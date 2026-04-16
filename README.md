@@ -7,11 +7,18 @@ It keeps the current NAS customizations:
 - QQBot heartbeat patch
 - QQ reply timeout patch
 - QQ reply model-name prefix patch
+- QQ private-chat direct-session routing
 - QQ private-chat delivery mirror session normalization
 - QQ private-chat inbound transcript mirroring
-- QQ private-chat legacy `group:c2c` session reconciliation
 - printer bootstrap entrypoint
 - Chinese locale and required print/document packages
+
+Removed from this custom image:
+
+- Gemini CLI integration and OAuth sync helpers
+- Weixin-specific runtime expectations
+- obsolete control-ui delivery model patch
+- one-time QQ legacy session reconciliation script
 
 The image is published to:
 
@@ -31,10 +38,11 @@ The image is published to:
 - `print-entrypoint.sh`: printer setup and runtime patch bootstrap
 - `patch-qqbot-response-timeout.py`: runtime QQ reply-timeout patch
 - `patch-qqbot-model-label.py`: runtime QQ model-label patch
+- `patch-qqbot-c2c-direct-session.py`: runtime QQ private-chat direct-session routing
 - `patch-qqbot-delivery-mirror-session.py`: runtime QQ private-chat mirror session normalization
+- `patch-qqbot-outbound-mirror-route.py`: runtime QQ outbound mirror routing
 - `patch-qqbot-inbound-transcript-mirror.py`: runtime QQ private-chat inbound transcript mirroring
 - `patch-qqbot-heartbeat.py`: heartbeat patch
-- `reconcile-qqbot-c2c-legacy-sessions.py`: startup cleanup for stale QQ private-chat legacy session keys
 
 ## NAS Update Flow
 
