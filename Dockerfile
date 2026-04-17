@@ -30,14 +30,12 @@ RUN apt-get update \
  && update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 
-COPY patch-qqbot-heartbeat.py /tmp/patch-qqbot-heartbeat.py
 COPY patch-qqbot-response-timeout.py /usr/local/bin/patch-qqbot-response-timeout.py
 COPY patch-qqbot-model-label.py /usr/local/bin/patch-qqbot-model-label.py
 COPY patch-qqbot-c2c-direct-session.py /usr/local/bin/patch-qqbot-c2c-direct-session.py
 COPY patch-qqbot-delivery-mirror-session.py /usr/local/bin/patch-qqbot-delivery-mirror-session.py
 COPY patch-qqbot-outbound-mirror-route.py /usr/local/bin/patch-qqbot-outbound-mirror-route.py
 COPY patch-qqbot-inbound-transcript-mirror.py /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py
-RUN python3 /tmp/patch-qqbot-heartbeat.py && rm -f /tmp/patch-qqbot-heartbeat.py
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
 ENV LC_ALL=zh_CN.UTF-8
