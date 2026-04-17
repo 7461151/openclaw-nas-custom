@@ -5,7 +5,7 @@ import re
 import sys
 
 MARKER = "QQBOT_INBOUND_TRANSCRIPT_MIRROR_PATCH"
-PATCH_VERSION = "2026-04-16.1"
+PATCH_VERSION = "2026-04-17.1"
 DEFAULT_DIST_DIR = Path("/app/dist")
 
 TRANSCRIPT_HELPER_BLOCK = f'''const {MARKER} = "{PATCH_VERSION}";
@@ -213,7 +213,7 @@ def find_transcript_runtime_file(dist_dir: Path, transcript_file: Path) -> Path:
 def find_gateway_file(dist_dir: Path) -> Path:
     patched_candidates = []
     fresh_candidates = []
-    for path in sorted(dist_dir.glob("gateway-*.js")):
+    for path in sorted(dist_dir.rglob("gateway-*.js")):
         try:
             text = path.read_text(encoding="utf-8")
         except Exception:

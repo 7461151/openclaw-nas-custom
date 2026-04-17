@@ -4,7 +4,7 @@ import os
 import re
 
 MARKER = 'const routedSessionKey = event.type === "c2c" ? `agent:${typeof route.agentId'
-PATCH_VERSION = "2026-04-16.3"
+PATCH_VERSION = "2026-04-17.1"
 DEFAULT_DIST_DIR = Path("/app/dist")
 LEGACY_ROUTE_MARKER = 'const routedSessionKey = event.type === "c2c" ? buildQQBotDirectSessionKey(route.agentId, event.senderId) : route.sessionKey;'
 BASE_SNIPPETS = [
@@ -31,7 +31,7 @@ def find_gateway_file(dist_dir: Path):
     patched_candidates = []
     legacy_candidates = []
     fresh_candidates = []
-    for path in sorted(dist_dir.glob("gateway-*.js")):
+    for path in sorted(dist_dir.rglob("gateway-*.js")):
         try:
             text = path.read_text(encoding="utf-8")
         except Exception:
