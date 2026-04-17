@@ -4,7 +4,7 @@ import os
 import re
 
 DIST_DIR = Path("/app/dist")
-PATCH_VERSION = "2026-04-16.1"
+PATCH_VERSION = "2026-04-17.1"
 PATCH_MARKER = 'const QQBOT_RESPONSE_TIMEOUT_PATCH = "'
 DEFAULT_RESPONSE_TIMEOUT_MS = 240_000
 MIN_RESPONSE_TIMEOUT_MS = 30_000
@@ -32,13 +32,17 @@ def read_response_timeout_ms() -> int:
 
 
 def locate_gateway_file() -> Path:
-    candidates = sorted(DIST_DIR.glob("gateway-*.js"))
+    candidates = sorted(DIST_DIR.rglob("gateway-*.js"))
     for path in candidates:
         try:
             text = path.read_text(encoding="utf-8")
         except Exception:
             continue
-        if "No response within timeout" in text and "dispatchReplyWithBufferedBlockDispatcher" in text:
+        if (
+            "No response within timeout" in text
+            and "dispatchReplyWithBufferedBlockDispatcher" in text
+            and "parseAndSendMediaTags" in text
+        ):
             return path
     raise RuntimeError("Could not locate compiled qqbot gateway chunk under /app/dist")
 

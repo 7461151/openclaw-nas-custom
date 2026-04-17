@@ -4,7 +4,7 @@ import re
 
 DIST_DIR = Path('/app/dist')
 MARKER = 'QQBOT_MODEL_LABEL_PATCH'
-PATCH_VERSION = '2026-04-15.2'
+PATCH_VERSION = '2026-04-17.1'
 BASE_SNIPPETS = [
     'async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef) {',
     'async function sendPlainReply(payload, replyText, event, actx, sendWithRetry, consumeQuoteRef, toolMediaUrls) {',
@@ -257,7 +257,7 @@ def log(msg):
 def find_gateway_file():
     patched_candidates = []
     fresh_candidates = []
-    for path in sorted(DIST_DIR.glob('gateway-*.js')):
+    for path in sorted(DIST_DIR.rglob('gateway-*.js')):
         try:
             text = path.read_text(encoding='utf-8')
         except Exception:
