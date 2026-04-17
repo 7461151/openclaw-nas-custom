@@ -6,8 +6,7 @@ on:
       - main
   workflow_dispatch:
   schedule:
-    - cron: "30 19 * * *"
-    - cron: "30 7 * * *"
+    - cron: "17 * * * *"
 
 permissions:
   contents: read
@@ -20,10 +19,95 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: 7461151/openclaw-nas-custom
+  BASE_IMAGE: ghcr.io/openclaw/openclaw:latest
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.plan.outputs.should_build }}
+      build_reason: ${{ steps.plan.outputs.build_reason }}
+      upstream_digest: ${{ steps.plan.outputs.upstream_digest }}
+      current_base_digest: ${{ steps.plan.outputs.current_base_digest }}
+
+    steps:
+      - name: Log In To GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide Whether To Build
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          should_build=false
+          build_reason=""
+
+          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
+            should_build=true
+            build_reason="event:${GITHUB_EVENT_NAME}"
+          fi
+
+          echo "Pulling upstream base image: ${BASE_IMAGE}"
+          docker pull "${BASE_IMAGE}" >/dev/null
+          upstream_repo_digest="$(docker image inspect "${BASE_IMAGE}" --format '{{join .RepoDigests "\n"}}' | grep '^'"${BASE_IMAGE%:latest}"'@' | head -n1 || true)"
+          if [[ -z "${upstream_repo_digest}" ]]; then
+            echo "Failed to resolve upstream repo digest" >&2
+            exit 1
+          fi
+          upstream_digest="${upstream_repo_digest#*@}"
+
+          current_base_digest=""
+          current_image="${REGISTRY}/${IMAGE_NAME}:latest"
+          if docker pull "${current_image}" >/dev/null 2>&1; then
+            current_base_digest="$(docker image inspect "${current_image}" --format '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' || true)"
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            if [[ -z "${current_base_digest}" ]]; then
+              should_build=true
+              build_reason="schedule:missing-current-base-digest"
+            elif [[ "${current_base_digest}" != "${upstream_digest}" ]]; then
+              should_build=true
+              build_reason="schedule:upstream-changed"
+            else
+              build_reason="schedule:no-upstream-change"
+            fi
+          fi
+
+          {
+            echo "should_build=${should_build}"
+            echo "build_reason=${build_reason}"
+            echo "upstream_digest=${upstream_digest}"
+            echo "current_base_digest=${current_base_digest}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build Decision Summary
+        shell: bash
+        run: |
+          {
+            echo "## Build Decision"
+            echo ""
+            echo "- event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- reason: \`${{ steps.plan.outputs.build_reason }}\`"
+            echo "- upstream digest: \`${{ steps.plan.outputs.upstream_digest }}\`"
+            if [[ -n "${{ steps.plan.outputs.current_base_digest }}" ]]; then
+              echo "- current custom image base digest: \`${{ steps.plan.outputs.current_base_digest }}\`"
+            else
+              echo "- current custom image base digest: `(missing)`"
+            fi
+            echo "- should build: \`${{ steps.plan.outputs.should_build }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   publish:
     runs-on: ubuntu-latest
+    needs:
+      - plan
+    if: needs.plan.outputs.should_build == 'true'
 
     steps:
       - name: Checkout
@@ -44,6 +128,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.base.name=${{ env.BASE_IMAGE }}
+            org.opencontainers.image.base.digest=${{ needs.plan.outputs.upstream_digest }}
           tags: |
             type=raw,value=latest
             type=sha,format=short
@@ -59,3 +146,14 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Publish Summary
+        shell: bash
+        run: |
+          {
+            echo "## Publish Result"
+            echo ""
+            echo "- reason: \`${{ needs.plan.outputs.build_reason }}\`"
+            echo "- upstream digest: \`${{ needs.plan.outputs.upstream_digest }}\`"
+            echo "- published image: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

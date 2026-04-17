@@ -28,7 +28,7 @@ The image is published to:
 ## How It Works
 
 - `Dockerfile` builds on top of `ghcr.io/openclaw/openclaw:latest`
-- GitHub Actions rebuilds and pushes the image
+- GitHub Actions checks the upstream image every hour and rebuilds only when the upstream base image changes (push and manual runs still build immediately)
 - NAS only needs to pull the published image and redeploy
 
 ## Files
