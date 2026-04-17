@@ -4,7 +4,6 @@ This repository publishes a custom OpenClaw image for NAS use.
 
 It keeps the current NAS customizations:
 
-- QQBot heartbeat patch
 - QQ reply timeout patch
 - QQ reply model-name prefix patch
 - QQ private-chat direct-session routing
@@ -44,7 +43,6 @@ The image is published to:
 - `patch-qqbot-delivery-mirror-session.py`: runtime QQ private-chat mirror session normalization
 - `patch-qqbot-outbound-mirror-route.py`: runtime QQ outbound mirror routing
 - `patch-qqbot-inbound-transcript-mirror.py`: runtime QQ private-chat inbound transcript mirroring
-- `patch-qqbot-heartbeat.py`: heartbeat patch
 
 ## NAS Update Flow
 
