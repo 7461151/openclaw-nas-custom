@@ -68,84 +68,9 @@ apply_qqbot_model_label_patch() {
   fi
 }
 
-apply_qqbot_response_timeout_patch() {
-  if [ ! -f /usr/local/bin/patch-qqbot-response-timeout.py ]; then
-    log "qqbot response timeout patch script not found; skipping"
-    return 0
-  fi
-
-  if python3 /usr/local/bin/patch-qqbot-response-timeout.py >/tmp/qqbot-response-timeout-patch.out 2>/tmp/qqbot-response-timeout-patch.err; then
-    cat /tmp/qqbot-response-timeout-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  else
-    log "qqbot response timeout patch failed"
-    cat /tmp/qqbot-response-timeout-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  fi
-}
-
-apply_qqbot_c2c_direct_session_patch() {
-  if [ ! -f /usr/local/bin/patch-qqbot-c2c-direct-session.py ]; then
-    log "qqbot c2c direct session patch script not found; skipping"
-    return 0
-  fi
-
-  if python3 /usr/local/bin/patch-qqbot-c2c-direct-session.py >/tmp/qqbot-c2c-direct-session-patch.out 2>/tmp/qqbot-c2c-direct-session-patch.err; then
-    cat /tmp/qqbot-c2c-direct-session-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  else
-    log "qqbot c2c direct session patch failed"
-    cat /tmp/qqbot-c2c-direct-session-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  fi
-}
-
-apply_qqbot_delivery_mirror_session_patch() {
-  if [ ! -f /usr/local/bin/patch-qqbot-delivery-mirror-session.py ]; then
-    log "qqbot delivery mirror session patch script not found; skipping"
-    return 0
-  fi
-
-  if python3 /usr/local/bin/patch-qqbot-delivery-mirror-session.py >/tmp/qqbot-delivery-mirror-session-patch.out 2>/tmp/qqbot-delivery-mirror-session-patch.err; then
-    cat /tmp/qqbot-delivery-mirror-session-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  else
-    log "qqbot delivery mirror session patch failed"
-    cat /tmp/qqbot-delivery-mirror-session-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  fi
-}
-
-apply_qqbot_outbound_mirror_route_patch() {
-  if [ ! -f /usr/local/bin/patch-qqbot-outbound-mirror-route.py ]; then
-    log "qqbot outbound mirror route patch script not found; skipping"
-    return 0
-  fi
-
-  if python3 /usr/local/bin/patch-qqbot-outbound-mirror-route.py >/tmp/qqbot-outbound-mirror-route-patch.out 2>/tmp/qqbot-outbound-mirror-route-patch.err; then
-    cat /tmp/qqbot-outbound-mirror-route-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  else
-    log "qqbot outbound mirror route patch failed"
-    cat /tmp/qqbot-outbound-mirror-route-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  fi
-}
-
-apply_qqbot_inbound_transcript_mirror_patch() {
-  if [ ! -f /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py ]; then
-    log "qqbot inbound transcript mirror patch script not found; skipping"
-    return 0
-  fi
-
-  if python3 /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py >/tmp/qqbot-inbound-transcript-mirror-patch.out 2>/tmp/qqbot-inbound-transcript-mirror-patch.err; then
-    cat /tmp/qqbot-inbound-transcript-mirror-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  else
-    log "qqbot inbound transcript mirror patch failed"
-    cat /tmp/qqbot-inbound-transcript-mirror-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  fi
-}
-
 start_cups
 configure_printer
-apply_qqbot_response_timeout_patch
 apply_qqbot_model_label_patch
-apply_qqbot_c2c_direct_session_patch
-apply_qqbot_delivery_mirror_session_patch
-apply_qqbot_outbound_mirror_route_patch
-apply_qqbot_inbound_transcript_mirror_patch
 
 if [ "$#" -eq 0 ]; then
   set -- node openclaw.mjs gateway --allow-unconfigured

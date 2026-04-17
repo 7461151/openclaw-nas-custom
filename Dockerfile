@@ -30,12 +30,7 @@ RUN apt-get update \
  && update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 
-COPY patch-qqbot-response-timeout.py /usr/local/bin/patch-qqbot-response-timeout.py
 COPY patch-qqbot-model-label.py /usr/local/bin/patch-qqbot-model-label.py
-COPY patch-qqbot-c2c-direct-session.py /usr/local/bin/patch-qqbot-c2c-direct-session.py
-COPY patch-qqbot-delivery-mirror-session.py /usr/local/bin/patch-qqbot-delivery-mirror-session.py
-COPY patch-qqbot-outbound-mirror-route.py /usr/local/bin/patch-qqbot-outbound-mirror-route.py
-COPY patch-qqbot-inbound-transcript-mirror.py /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
 ENV LC_ALL=zh_CN.UTF-8
@@ -43,4 +38,4 @@ ENV LC_ALL=zh_CN.UTF-8
 COPY lp /usr/local/bin/lp
 COPY Epson-L6260_Series-epson-escpr2-en.ppd.gz /usr/share/ppd/Epson/epson-inkjet-printer-escpr/Epson-L6260_Series-epson-escpr2-en.ppd.gz
 COPY print-entrypoint.sh /usr/local/bin/print-entrypoint.sh
-RUN chmod +x /usr/local/bin/lp /usr/local/bin/print-entrypoint.sh /usr/local/bin/patch-qqbot-response-timeout.py /usr/local/bin/patch-qqbot-c2c-direct-session.py /usr/local/bin/patch-qqbot-delivery-mirror-session.py /usr/local/bin/patch-qqbot-outbound-mirror-route.py /usr/local/bin/patch-qqbot-inbound-transcript-mirror.py
+RUN chmod +x /usr/local/bin/lp /usr/local/bin/print-entrypoint.sh
