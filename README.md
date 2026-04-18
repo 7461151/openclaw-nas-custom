@@ -5,6 +5,7 @@ This repository publishes a custom OpenClaw image for NAS use.
 It keeps the current NAS customizations:
 
 - QQ reply model-name prefix patch
+- built-in Chromium for standalone browser automation
 - GitHub CLI support (`gh`)
 - password-based SSH automation support (`sshpass`)
 - video download dependency (`yt-dlp`)
@@ -35,6 +36,7 @@ The image is published to:
 - `compose.build.local.yaml`: original local-build compose file for debugging
 - `print-entrypoint.sh`: printer setup and model-label patch bootstrap
 - `patch-qqbot-model-label.py`: runtime QQ model-label patch
+- headless Chromium defaults are auto-filled into `~/.openclaw/openclaw.json` on container start when missing
 
 ## NAS Update Flow
 

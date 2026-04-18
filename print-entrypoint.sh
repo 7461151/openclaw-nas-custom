@@ -68,9 +68,49 @@ apply_qqbot_model_label_patch() {
   fi
 }
 
+ensure_browser_config() {
+  config_path="/home/node/.openclaw/openclaw.json"
+
+  mkdir -p /home/node/.openclaw
+
+  python3 - "$config_path" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+
+if config_path.exists():
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        raise SystemExit("invalid openclaw.json; refusing to rewrite browser config")
+else:
+    config = {}
+
+browser = config.setdefault("browser", {})
+browser.setdefault("enabled", True)
+browser.setdefault("defaultProfile", "openclaw")
+browser.setdefault("headless", True)
+browser.setdefault("noSandbox", True)
+
+if os.path.exists("/usr/bin/chromium"):
+    browser.setdefault("executablePath", "/usr/bin/chromium")
+
+config_path.write_text(
+    json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8",
+)
+PY
+
+  log "browser defaults ensured for headless Chromium"
+}
+
 start_cups
 configure_printer
 apply_qqbot_model_label_patch
+ensure_browser_config
 
 if [ "$#" -eq 0 ]; then
   set -- node openclaw.mjs gateway --allow-unconfigured
