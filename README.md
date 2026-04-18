@@ -7,6 +7,7 @@ It keeps the current NAS customizations:
 - QQ reply model-name prefix patch
 - GitHub CLI support (`gh`)
 - password-based SSH automation support (`sshpass`)
+- video download dependency (`yt-dlp`)
 - printer bootstrap entrypoint
 - Chinese locale and required print/document packages
 
@@ -50,6 +51,8 @@ If your NAS container manager supports "redeploy + pull latest image", that is e
 The image includes `gh`, so the built-in GitHub skill can use GitHub CLI after authentication is configured.
 
 The image also includes `sshpass`, so tasks inside the container can automate password-based SSH when a key is not available.
+
+The image now also includes `yt-dlp`, so a workspace skill/script can handle YouTube and other media downloads without relying on `web_fetch`.
 
 ## First-Time NAS Switch
 

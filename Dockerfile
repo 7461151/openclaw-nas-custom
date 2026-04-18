@@ -8,6 +8,7 @@ RUN apt-get update \
     ffmpeg \
     gh \
     python3 \
+    python3-pip \
     python3-pil \
     openssh-client \
     sshpass \
@@ -25,6 +26,7 @@ RUN apt-get update \
     libreoffice-writer \
     libreoffice-calc \
     libreoffice-impress \
+ && python3 -m pip install --no-cache-dir --break-system-packages -U yt-dlp \
  && sed -i 's/^# *zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen \
  && locale-gen zh_CN.UTF-8 \
  && update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 \
