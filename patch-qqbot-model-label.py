@@ -4,7 +4,7 @@ import re
 
 DIST_DIR = Path("/app/dist")
 MARKER = "OPENCLAW_MODEL_REPLY_PREFIX_PATCH"
-PATCH_VERSION = "2026-04-22.7"
+PATCH_VERSION = "2026-04-22.8"
 HELPER_ANCHOR = "/** Shared helper for sending chunked text replies. */"
 BASE_SNIPPETS = [
     "async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef) {",
@@ -14,7 +14,7 @@ BASE_SNIPPETS = [
     'replyOptions: { disableBlockStreaming: account.config.streaming?.mode === "off" }',
 ]
 
-HELPER_BLOCK = r'''const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "2026-04-22.7";
+HELPER_BLOCK = r'''const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "2026-04-22.8";
 const OPENCLAW_HOME_DIR = process.env.HOME || "/home/node";
 const OPENCLAW_CONFIG_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "openclaw.json");
 const OPENCLAW_SESSION_STORE_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "agents", "main", "sessions", "sessions.json");
@@ -279,6 +279,40 @@ function prependModelReplyHeader(text, modelLabel) {
 	if (!header) return text;
 	return header + stripLeadingModelReplyHeaders(text);
 }
+function stageQQBotLocalMediaPath(mediaPath, log, prefix) {
+	const normalizedPath = normalizePath(normalizeOptionalString(mediaPath) ?? "");
+	if (!normalizedPath || !isLocalPath(normalizedPath)) return normalizedPath;
+	const allowedPath = resolveQQBotPayloadLocalFilePath(normalizedPath);
+	if (allowedPath) return allowedPath;
+	try {
+		const resolvedPath = path.resolve(normalizedPath);
+		if (!fs.existsSync(resolvedPath)) return normalizedPath;
+		const extension = path.extname(resolvedPath);
+		const baseName = sanitizeFileName(path.basename(resolvedPath, extension)) || "media";
+		const stagedDir = getQQBotMediaDir("outbound");
+		const stagedName = `${baseName}-${crypto.randomUUID()}${extension}`;
+		const stagedPath = path.join(stagedDir, stagedName);
+		fs.copyFileSync(resolvedPath, stagedPath);
+		const allowedStagedPath = resolveQQBotPayloadLocalFilePath(stagedPath);
+		if (allowedStagedPath) {
+			log?.info(`${prefix} Staged local media for QQ send: ${normalizedPath} -> ${allowedStagedPath}`);
+			return allowedStagedPath;
+		}
+	} catch (error) {
+		log?.error(`${prefix} Failed to stage local media ${normalizedPath}: ${String(error)}`);
+	}
+	return normalizedPath;
+}
+function stageQQBotLocalMediaUrls(mediaUrls, log, prefix) {
+	const stagedUrls = [];
+	for (const mediaUrl of mediaUrls ?? []) {
+		const normalizedUrl = normalizeOptionalString(mediaUrl);
+		if (!normalizedUrl) continue;
+		const stagedUrl = isLocalPath(normalizedUrl) ? stageQQBotLocalMediaPath(normalizedUrl, log, prefix) : normalizedUrl;
+		if (stagedUrl && !stagedUrls.includes(stagedUrl)) stagedUrls.push(stagedUrl);
+	}
+	return stagedUrls;
+}
 '''
 
 
@@ -331,6 +365,7 @@ def patch_once(text: str) -> str:
         f'const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "{PATCH_VERSION}";' in text
         and "const { account, log, modelLabel } = actx;" in text
         and "const { account, qualifiedTarget, log, modelLabel } = actx;" in text
+        and "stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);" in text
         and "modelLabel: currentModelLabel" in text
         and "onModelSelected: (selection) => {" in text
     ):
@@ -372,10 +407,12 @@ def patch_once(text: str) -> str:
         "parseAndSendMediaTags actx",
     )
 
-    text = text.replace(
-        '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log, prefix);\n\t\tif (mediaPath && isLocalPath(mediaPath)) mediaPath = stageQQBotLocalMediaPath(mediaPath, log, prefix);\n\t\tif (mediaPath) {',
+    text = replace_once_if_needed(
+        text,
         '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log, prefix);\n\t\tif (mediaPath) {',
-        1,
+        '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log, prefix);\n\t\tif (mediaPath && isLocalPath(mediaPath)) mediaPath = stageQQBotLocalMediaPath(mediaPath, log, prefix);\n\t\tif (mediaPath) {',
+        "stageQQBotLocalMediaPath(mediaPath, log, prefix);",
+        "parseAndSendMediaTags local media staging",
     )
 
     text = replace_once_if_needed(
@@ -402,10 +439,12 @@ def patch_once(text: str) -> str:
         "sendPlainReply header injection",
     )
 
-    text = text.replace(
-        '\tconst stagedLocalMediaToSend = stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);\n\tif (stagedLocalMediaToSend.length > 0) {\n\t\tlog?.info(`${prefix} Sending ${stagedLocalMediaToSend.length} local media via sendMedia auto-routing`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: stagedLocalMediaToSend,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaPath) => `${prefix} Sent local media: ${mediaPath}`,\n\t\t\tonResultError: (mediaPath, error) => `${prefix} sendMedia(auto) error for ${mediaPath}: ${error}`,\n\t\t\tonThrownError: (mediaPath, error) => `${prefix} sendMedia(auto) failed for ${mediaPath}: ${error}`\n\t\t});\n\t}\n\tconst stagedToolMediaUrls = stageQQBotLocalMediaUrls(toolMediaUrls, log, prefix);\n\tif (stagedToolMediaUrls.length > 0) {\n\t\tlog?.info(`${prefix} Forwarding ${stagedToolMediaUrls.length} tool-collected media URL(s) after block deliver`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: stagedToolMediaUrls,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaUrl) => `${prefix} Forwarded tool media: ${mediaUrl.slice(0, 80)}...`,\n\t\t\tonResultError: (_mediaUrl, error) => `${prefix} Tool media forward error: ${error}`,\n\t\t\tonThrownError: (_mediaUrl, error) => `${prefix} Tool media forward failed: ${error}`\n\t\t});\n\t\ttoolMediaUrls.length = 0;\n\t}',
+    text = replace_once_if_needed(
+        text,
         '\tif (localMediaToSend.length > 0) {\n\t\tlog?.info(`${prefix} Sending ${localMediaToSend.length} local media via sendMedia auto-routing`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: localMediaToSend,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaPath) => `${prefix} Sent local media: ${mediaPath}`,\n\t\t\tonResultError: (mediaPath, error) => `${prefix} sendMedia(auto) error for ${mediaPath}: ${error}`,\n\t\t\tonThrownError: (mediaPath, error) => `${prefix} sendMedia(auto) failed for ${mediaPath}: ${error}`\n\t\t});\n\t}\n\tif (toolMediaUrls.length > 0) {\n\t\tlog?.info(`${prefix} Forwarding ${toolMediaUrls.length} tool-collected media URL(s) after block deliver`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: toolMediaUrls,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaUrl) => `${prefix} Forwarded tool media: ${mediaUrl.slice(0, 80)}...`,\n\t\t\tonResultError: (_mediaUrl, error) => `${prefix} Tool media forward error: ${error}`,\n\t\t\tonThrownError: (_mediaUrl, error) => `${prefix} Tool media forward failed: ${error}`\n\t\t});\n\t\ttoolMediaUrls.length = 0;\n\t}',
-        1,
+        '\tconst stagedLocalMediaToSend = stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);\n\tif (stagedLocalMediaToSend.length > 0) {\n\t\tlog?.info(`${prefix} Sending ${stagedLocalMediaToSend.length} local media via sendMedia auto-routing`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: stagedLocalMediaToSend,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaPath) => `${prefix} Sent local media: ${mediaPath}`,\n\t\t\tonResultError: (mediaPath, error) => `${prefix} sendMedia(auto) error for ${mediaPath}: ${error}`,\n\t\t\tonThrownError: (mediaPath, error) => `${prefix} sendMedia(auto) failed for ${mediaPath}: ${error}`\n\t\t});\n\t}\n\tconst stagedToolMediaUrls = stageQQBotLocalMediaUrls(toolMediaUrls, log, prefix);\n\tif (stagedToolMediaUrls.length > 0) {\n\t\tlog?.info(`${prefix} Forwarding ${stagedToolMediaUrls.length} tool-collected media URL(s) after block deliver`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: stagedToolMediaUrls,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaUrl) => `${prefix} Forwarded tool media: ${mediaUrl.slice(0, 80)}...`,\n\t\t\tonResultError: (_mediaUrl, error) => `${prefix} Tool media forward error: ${error}`,\n\t\t\tonThrownError: (_mediaUrl, error) => `${prefix} Tool media forward failed: ${error}`\n\t\t});\n\t\ttoolMediaUrls.length = 0;\n\t}',
+        "const stagedLocalMediaToSend = stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);",
+        "sendPlainReply local media staging",
     )
 
     text = replace_once_if_needed(
