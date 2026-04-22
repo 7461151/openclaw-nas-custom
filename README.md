@@ -51,6 +51,7 @@ docker compose up -d
 If your NAS container manager supports "redeploy + pull latest image", that is enough after switching to this `docker-compose.yaml`.
 
 The image includes `gh`, so the built-in GitHub skill can use GitHub CLI after authentication is configured.
+Set `GH_CONFIG_DIR=/home/node/.openclaw/gh` in compose so GitHub CLI auth survives container redeploys.
 
 The image also includes `sshpass`, so tasks inside the container can automate password-based SSH when a key is not available.
 

@@ -11,6 +11,7 @@ services:
     entrypoint: ["/usr/local/bin/print-entrypoint.sh"]
     environment:
       HOME: /home/node
+      GH_CONFIG_DIR: /home/node/.openclaw/gh
       NODE_ENV: production
       TZ: Asia/Shanghai
       LANG: zh_CN.UTF-8
