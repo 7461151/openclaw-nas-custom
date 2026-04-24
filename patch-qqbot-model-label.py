@@ -4,17 +4,30 @@ import re
 
 DIST_DIR = Path("/app/dist")
 MARKER = "OPENCLAW_MODEL_REPLY_PREFIX_PATCH"
-PATCH_VERSION = "2026-04-22.8"
-HELPER_ANCHOR = "/** Shared helper for sending chunked text replies. */"
-BASE_SNIPPETS = [
+PATCH_VERSION = "2026-04-24.1"
+HELPER_ANCHORS = [
+    "/** Shared helper for sending chunked text replies. */",
+    "async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef, deps) {",
     "async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef) {",
-    "async function sendPlainReply(payload, replyText, event, actx, sendWithRetry, consumeQuoteRef, toolMediaUrls) {",
-    "async function sendPlainTextReply(params) {",
-    "pluginRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({",
-    'replyOptions: { disableBlockStreaming: account.config.streaming?.mode === "off" }',
+]
+BASE_SNIPPET_GROUPS = [
+    [
+        "async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef) {",
+        "async function sendPlainReply(payload, replyText, event, actx, sendWithRetry, consumeQuoteRef, toolMediaUrls) {",
+        "async function sendPlainTextReply(params) {",
+        "pluginRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({",
+        'replyOptions: { disableBlockStreaming: account.config.streaming?.mode === "off" }',
+    ],
+    [
+        "async function parseAndSendMediaTags(",
+        "async function sendPlainReply(",
+        "async function sendPlainTextReply(",
+        "dispatchReplyWithBufferedBlockDispatcher({",
+        'Provider: "qqbot"',
+    ],
 ]
 
-HELPER_BLOCK = r'''const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "2026-04-22.8";
+HELPER_BLOCK = r'''const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "2026-04-24.1";
 const OPENCLAW_HOME_DIR = process.env.HOME || "/home/node";
 const OPENCLAW_CONFIG_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "openclaw.json");
 const OPENCLAW_SESSION_STORE_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "agents", "main", "sessions", "sessions.json");
@@ -320,6 +333,12 @@ def log(message: str) -> None:
     print(f"[qqbot-model-label] {message}")
 
 
+def matches_gateway_signature(path: Path, text: str) -> bool:
+    normalized_path = str(path).replace("\\", "/").lower()
+    is_qqbot_gateway = "/qqbot/" in normalized_path or 'Provider: "qqbot"' in text or 'channel: "qqbot"' in text
+    return is_qqbot_gateway and any(all(snippet in text for snippet in group) for group in BASE_SNIPPET_GROUPS)
+
+
 def find_gateway_file() -> Path:
     patched_candidates = []
     fresh_candidates = []
@@ -328,11 +347,12 @@ def find_gateway_file() -> Path:
             text = path.read_text(encoding="utf-8")
         except Exception:
             continue
+        if not matches_gateway_signature(path, text):
+            continue
         if (MARKER in text or "QQBOT_MODEL_LABEL_PATCH" in text) and "dispatchReplyWithBufferedBlockDispatcher({" in text:
             patched_candidates.append(path)
             continue
-        if all(snippet in text for snippet in BASE_SNIPPETS):
-            fresh_candidates.append(path)
+        fresh_candidates.append(path)
     if patched_candidates:
         return patched_candidates[0]
     if fresh_candidates:
@@ -347,9 +367,10 @@ def ensure_helper_block(text: str) -> str:
     )
     if pattern.search(text):
         return pattern.sub(lambda _m: HELPER_BLOCK + "\n", text, count=1)
-    if HELPER_ANCHOR not in text:
-        raise RuntimeError("shared helper anchor missing")
-    return text.replace(HELPER_ANCHOR, HELPER_BLOCK + "\n" + HELPER_ANCHOR, 1)
+    for anchor in HELPER_ANCHORS:
+        if anchor in text:
+            return text.replace(anchor, HELPER_BLOCK + "\n" + anchor, 1)
+    raise RuntimeError("shared helper anchor missing")
 
 
 def replace_once_if_needed(text: str, old: str, new: str, marker: str, name: str) -> str:
@@ -358,6 +379,15 @@ def replace_once_if_needed(text: str, old: str, new: str, marker: str, name: str
     if old not in text:
         raise RuntimeError(f"{name} anchor missing")
     return text.replace(old, new, 1)
+
+
+def replace_variant_if_needed(text: str, variants: list[tuple[str, str]], marker: str, name: str) -> str:
+    if marker in text:
+        return text
+    for old, new in variants:
+        if old in text:
+            return text.replace(old, new, 1)
+    raise RuntimeError(f"{name} anchor missing")
 
 
 def patch_once(text: str) -> str:
@@ -373,7 +403,9 @@ def patch_once(text: str) -> str:
 
     text = ensure_helper_block(text)
     has_routed_session_key = 'const routedSessionKey = event.type === "c2c" ?' in text
-    session_key_expr = "routedSessionKey" if has_routed_session_key else "route.sessionKey"
+    has_inbound_route_session_key = "inbound.route.sessionKey" in text
+    session_key_expr = "routedSessionKey" if has_routed_session_key else "inbound.route.sessionKey" if has_inbound_route_session_key else "route.sessionKey"
+    agent_id_expr = "inbound.route.agentId" if "inbound.route.agentId" in text else "route.agentId"
 
     duplicate_current_model_pattern = re.compile(
         r'(?m)^([ \t]*)let currentModelLabel = resolveReplyModelLabel\(routedSessionKey, cfg, route\.agentId\);\n'
@@ -399,114 +431,171 @@ def patch_once(text: str) -> str:
         count=1,
     )
 
-    text = replace_once_if_needed(
+    text = replace_variant_if_needed(
         text,
-        'const { account, log } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;\n\tconst text = normalizeMediaTags(replyText);',
-        'const { account, log, modelLabel } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;\n\tconst modelReplyHeader = buildModelReplyHeader(modelLabel);\n\tconst text = normalizeMediaTags(replyText);',
+        [
+            (
+                'const { account, log } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;\n\tconst text = normalizeMediaTags(replyText);',
+                'const { account, log, modelLabel } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;\n\tconst modelReplyHeader = buildModelReplyHeader(modelLabel);\n\tconst text = normalizeMediaTags(replyText);',
+            ),
+            (
+                'const { account, log } = actx;\n\tconst text = normalizeMediaTags(replyText);',
+                'const { account, log, modelLabel } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;\n\tconst modelReplyHeader = buildModelReplyHeader(modelLabel);\n\tconst text = normalizeMediaTags(replyText);',
+            ),
+        ],
         'const { account, log, modelLabel } = actx;',
         "parseAndSendMediaTags actx",
     )
 
-    text = replace_once_if_needed(
+    text = replace_variant_if_needed(
         text,
-        '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log, prefix);\n\t\tif (mediaPath) {',
-        '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log, prefix);\n\t\tif (mediaPath && isLocalPath(mediaPath)) mediaPath = stageQQBotLocalMediaPath(mediaPath, log, prefix);\n\t\tif (mediaPath) {',
+        [
+            (
+                '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log, prefix);\n\t\tif (mediaPath) {',
+                '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log, prefix);\n\t\tif (mediaPath && isLocalPath(mediaPath)) mediaPath = stageQQBotLocalMediaPath(mediaPath, log, prefix);\n\t\tif (mediaPath) {',
+            ),
+            (
+                '\t\tconst mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log);\n\t\tif (mediaPath) {',
+                '\t\tlet mediaPath = decodeMediaPath(normalizeOptionalString(match[2]) ?? "", log);\n\t\tif (mediaPath && isLocalPath(mediaPath)) mediaPath = stageQQBotLocalMediaPath(mediaPath, log, prefix);\n\t\tif (mediaPath) {',
+            ),
+        ],
         "stageQQBotLocalMediaPath(mediaPath, log, prefix);",
         "parseAndSendMediaTags local media staging",
     )
 
-    text = replace_once_if_needed(
+    text = replace_variant_if_needed(
         text,
-        '\tlog?.info(`${prefix} Send queue: ${sendQueue.map((item) => item.type).join(" -> ")}`);',
-        '\tif (modelReplyHeader) {\n\t\tif (sendQueue[0]?.type === "text") sendQueue[0].content = prependModelReplyHeader(sendQueue[0].content, modelLabel);\n\t\telse sendQueue.unshift({\n\t\t\ttype: "text",\n\t\t\tcontent: modelReplyHeader.trim()\n\t\t});\n\t}\n\tlog?.info(`${prefix} Send queue: ${sendQueue.map((item) => item.type).join(" -> ")}`);',
+        [
+            (
+                '\tconst mediaTarget = resolveMediaTargetContext(event, account);',
+                '\tif (modelReplyHeader) {\n\t\tif (sendQueue[0]?.type === "text") sendQueue[0].content = prependModelReplyHeader(sendQueue[0].content, modelLabel);\n\t\telse sendQueue.unshift({\n\t\t\ttype: "text",\n\t\t\tcontent: modelReplyHeader.trim()\n\t\t});\n\t}\n\tconst mediaTarget = resolveMediaTargetContext(event, account);',
+            ),
+        ],
         "if (modelReplyHeader) {",
         "parseAndSendMediaTags header injection",
     )
 
-    text = replace_once_if_needed(
+    text = replace_variant_if_needed(
         text,
-        'const { account, qualifiedTarget, log } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;',
-        'const { account, qualifiedTarget, log, modelLabel } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;',
+        [
+            (
+                'const { account, qualifiedTarget, log } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;',
+                'const { account, qualifiedTarget, log, modelLabel } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;',
+            ),
+            (
+                'const { account, qualifiedTarget, log } = actx;\n\tconst collectedImageUrls = [];',
+                'const { account, qualifiedTarget, log, modelLabel } = actx;\n\tconst prefix = `[qqbot:${account.accountId}]`;\n\tconst collectedImageUrls = [];',
+            ),
+        ],
         "const { account, qualifiedTarget, log, modelLabel } = actx;",
         "sendPlainReply actx",
     )
 
-    text = replace_once_if_needed(
+    text = replace_variant_if_needed(
         text,
-        '\tfor (const m of mdMatches) {\n\t\tconst url = m[2]?.trim();\n\t\tif (url && !url.startsWith("http://") && !url.startsWith("https://") && !isLocalPath(url)) textWithoutImages = textWithoutImages.replace(m[0], "").trim();\n\t}\n\tif (useMarkdown) await sendMarkdownReply({',
-        '\tfor (const m of mdMatches) {\n\t\tconst url = m[2]?.trim();\n\t\tif (url && !url.startsWith("http://") && !url.startsWith("https://") && !isLocalPath(url)) textWithoutImages = textWithoutImages.replace(m[0], "").trim();\n\t}\n\ttextWithoutImages = prependModelReplyHeader(textWithoutImages, modelLabel);\n\tif (useMarkdown) await sendMarkdownReply({',
+        [
+            (
+                '\tfor (const m of mdMatches) {\n\t\tconst url = m[2]?.trim();\n\t\tif (url && !url.startsWith("http://") && !url.startsWith("https://") && !isLocalPath(url)) textWithoutImages = textWithoutImages.replace(m[0], "").trim();\n\t}\n\tif (useMarkdown) await sendMarkdownReply({',
+                '\tfor (const m of mdMatches) {\n\t\tconst url = m[2]?.trim();\n\t\tif (url && !url.startsWith("http://") && !url.startsWith("https://") && !isLocalPath(url)) textWithoutImages = textWithoutImages.replace(m[0], "").trim();\n\t}\n\ttextWithoutImages = prependModelReplyHeader(textWithoutImages, modelLabel);\n\tif (useMarkdown) await sendMarkdownReply({',
+            ),
+            (
+                '\tfor (const m of mdMatches) {\n\t\tconst url = m[2]?.trim();\n\t\tif (url && !url.startsWith("http://") && !url.startsWith("https://") && !isLocalPath(url)) textWithoutImages = textWithoutImages.replace(m[0], "").trim();\n\t}\n\tif (useMarkdown) await sendMarkdownReply(textWithoutImages, collectedImageUrls, mdMatches, bareUrlMatches, event, actx, sendWithRetry, consumeQuoteRef, deps);',
+                '\tfor (const m of mdMatches) {\n\t\tconst url = m[2]?.trim();\n\t\tif (url && !url.startsWith("http://") && !url.startsWith("https://") && !isLocalPath(url)) textWithoutImages = textWithoutImages.replace(m[0], "").trim();\n\t}\n\ttextWithoutImages = prependModelReplyHeader(textWithoutImages, modelLabel);\n\tif (useMarkdown) await sendMarkdownReply(textWithoutImages, collectedImageUrls, mdMatches, bareUrlMatches, event, actx, sendWithRetry, consumeQuoteRef, deps);',
+            ),
+        ],
         "textWithoutImages = prependModelReplyHeader(textWithoutImages, modelLabel);",
         "sendPlainReply header injection",
     )
 
     text = replace_once_if_needed(
         text,
-        '\tif (localMediaToSend.length > 0) {\n\t\tlog?.info(`${prefix} Sending ${localMediaToSend.length} local media via sendMedia auto-routing`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: localMediaToSend,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaPath) => `${prefix} Sent local media: ${mediaPath}`,\n\t\t\tonResultError: (mediaPath, error) => `${prefix} sendMedia(auto) error for ${mediaPath}: ${error}`,\n\t\t\tonThrownError: (mediaPath, error) => `${prefix} sendMedia(auto) failed for ${mediaPath}: ${error}`\n\t\t});\n\t}\n\tif (toolMediaUrls.length > 0) {\n\t\tlog?.info(`${prefix} Forwarding ${toolMediaUrls.length} tool-collected media URL(s) after block deliver`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: toolMediaUrls,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaUrl) => `${prefix} Forwarded tool media: ${mediaUrl.slice(0, 80)}...`,\n\t\t\tonResultError: (_mediaUrl, error) => `${prefix} Tool media forward error: ${error}`,\n\t\t\tonThrownError: (_mediaUrl, error) => `${prefix} Tool media forward failed: ${error}`\n\t\t});\n\t\ttoolMediaUrls.length = 0;\n\t}',
-        '\tconst stagedLocalMediaToSend = stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);\n\tif (stagedLocalMediaToSend.length > 0) {\n\t\tlog?.info(`${prefix} Sending ${stagedLocalMediaToSend.length} local media via sendMedia auto-routing`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: stagedLocalMediaToSend,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaPath) => `${prefix} Sent local media: ${mediaPath}`,\n\t\t\tonResultError: (mediaPath, error) => `${prefix} sendMedia(auto) error for ${mediaPath}: ${error}`,\n\t\t\tonThrownError: (mediaPath, error) => `${prefix} sendMedia(auto) failed for ${mediaPath}: ${error}`\n\t\t});\n\t}\n\tconst stagedToolMediaUrls = stageQQBotLocalMediaUrls(toolMediaUrls, log, prefix);\n\tif (stagedToolMediaUrls.length > 0) {\n\t\tlog?.info(`${prefix} Forwarding ${stagedToolMediaUrls.length} tool-collected media URL(s) after block deliver`);\n\t\tawait sendQQBotAutoMediaBatch({\n\t\t\tqualifiedTarget,\n\t\t\taccount,\n\t\t\treplyToId: event.messageId,\n\t\t\tmediaUrls: stagedToolMediaUrls,\n\t\t\tlog,\n\t\t\tonSuccess: (mediaUrl) => `${prefix} Forwarded tool media: ${mediaUrl.slice(0, 80)}...`,\n\t\t\tonResultError: (_mediaUrl, error) => `${prefix} Tool media forward error: ${error}`,\n\t\t\tonThrownError: (_mediaUrl, error) => `${prefix} Tool media forward failed: ${error}`\n\t\t});\n\t\ttoolMediaUrls.length = 0;\n\t}',
+        '\tif (localMediaToSend.length > 0) {',
+        '\tconst stagedLocalMediaToSend = stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);\n\tif (stagedLocalMediaToSend.length > 0) {',
         "const stagedLocalMediaToSend = stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);",
         "sendPlainReply local media staging",
     )
 
     text = replace_once_if_needed(
         text,
-        '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\ttry {',
-        '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\tlet leadingModelHeader = "";\n\tif (params.imageUrls.length > 0) {\n\t\tconst trimmedResult = result.trimStart();\n\t\tif (trimmedResult.startsWith("\\u3010")) {\n\t\t\tconst headerEnd = trimmedResult.indexOf("\\u3011");\n\t\t\tif (headerEnd > 0 && headerEnd <= 61) {\n\t\t\t\tleadingModelHeader = trimmedResult.slice(0, headerEnd + 1);\n\t\t\t\tresult = trimmedResult.slice(headerEnd + 1).trimStart();\n\t\t\t}\n\t\t}\n\t}\n\tif (leadingModelHeader) {\n\t\tawait sendQQBotTextChunksWithRetry({\n\t\t\taccount,\n\t\t\tevent,\n\t\t\tchunks: chunkText(leadingModelHeader, TEXT_CHUNK_LIMIT),\n\t\t\tsendWithRetry,\n\t\t\tconsumeQuoteRef,\n\t\t\tallowDm: false,\n\t\t\tlog,\n\t\t\tonSuccess: (chunk) => `${prefix} Sent model header chunk (${chunk.length} chars) (${event.type})`,\n\t\t\tonError: (err) => `${prefix} Failed to send model header: ${String(err)}`\n\t\t});\n\t}\n\ttry {',
-        "let leadingModelHeader = \"\";",
+        '\t\t\tmediaUrls: localMediaToSend,',
+        '\t\t\tmediaUrls: stagedLocalMediaToSend,',
+        "mediaUrls: stagedLocalMediaToSend,",
+        "sendPlainReply local media url injection",
+    )
+
+    text = replace_once_if_needed(
+        text,
+        '\tif (toolMediaUrls.length > 0) {',
+        '\tconst stagedToolMediaUrls = stageQQBotLocalMediaUrls(toolMediaUrls, log, prefix);\n\tif (stagedToolMediaUrls.length > 0) {',
+        "const stagedToolMediaUrls = stageQQBotLocalMediaUrls(toolMediaUrls, log, prefix);",
+        "sendPlainReply tool media staging",
+    )
+
+    text = replace_once_if_needed(
+        text,
+        '\t\t\tmediaUrls: toolMediaUrls,',
+        '\t\t\tmediaUrls: stagedToolMediaUrls,',
+        "mediaUrls: stagedToolMediaUrls,",
+        "sendPlainReply tool media url injection",
+    )
+
+    text = replace_variant_if_needed(
+        text,
+        [
+            (
+                '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\ttry {',
+                '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\tlet leadingModelHeader = "";\n\tif (imageUrls.length > 0) {\n\t\tconst trimmedResult = result.trimStart();\n\t\tif (trimmedResult.startsWith("\\u3010")) {\n\t\t\tconst headerEnd = trimmedResult.indexOf("\\u3011");\n\t\t\tif (headerEnd > 0 && headerEnd <= 61) {\n\t\t\t\tleadingModelHeader = trimmedResult.slice(0, headerEnd + 1);\n\t\t\t\tresult = trimmedResult.slice(headerEnd + 1).trimStart();\n\t\t\t}\n\t\t}\n\t}\n\tif (leadingModelHeader) {\n\t\tawait sendTextChunksWithRetry({\n\t\t\taccount,\n\t\t\tevent,\n\t\t\tchunks: deps.chunkText(leadingModelHeader, TEXT_CHUNK_LIMIT),\n\t\t\tsendWithRetry,\n\t\t\tconsumeQuoteRef,\n\t\t\tallowDm: false,\n\t\t\tlog,\n\t\t\tonSuccess: (chunk) => `Sent model header chunk (${chunk.length} chars) (${event.type})`,\n\t\t\tonError: (err) => `Failed to send model header: ${formatErrorMessage(err)}`\n\t\t});\n\t}\n\ttry {',
+            ),
+            (
+                '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\tlet leadingModelHeader = "";\n\tif (params.imageUrls.length > 0) {',
+                '\tif (result && event.type !== "c2c") result = result.replace(/([a-zA-Z0-9])\\.([a-zA-Z0-9])/g, "$1_$2");\n\tlet leadingModelHeader = "";\n\tif (params.imageUrls.length > 0) {',
+            ),
+        ],
+        'let leadingModelHeader = "";',
         "sendPlainTextReply header split",
     )
 
     if "let currentModelLabel = resolveReplyModelLabel(" not in text:
-        pattern = re.compile(r'(?m)^([ \t]*)const dispatchPromise = pluginRuntime\.channel\.reply\.dispatchReplyWithBufferedBlockDispatcher\(\{')
+        pattern = re.compile(r'(?m)^([ \t]*)const dispatchPromise = ((?:pluginRuntime|runtime))\.channel\.reply\.dispatchReplyWithBufferedBlockDispatcher\(\{')
         match = pattern.search(text)
         if not match:
             raise RuntimeError("dispatchPromise anchor missing")
         indent = match.group(1)
+        runtime_name = match.group(2)
         injection = (
-            f"{indent}let currentModelLabel = resolveReplyModelLabel({session_key_expr}, cfg, route.agentId);\n"
+            f"{indent}let currentModelLabel = resolveReplyModelLabel({session_key_expr}, cfg, {agent_id_expr});\n"
             f"{indent}const updateCurrentModelLabel = (selection) => {{\n"
             f"{indent}\tconst runtimeModelLabel = resolveRuntimeReplyModelLabel(cfg, selection);\n"
             f"{indent}\tif (runtimeModelLabel) currentModelLabel = runtimeModelLabel;\n"
             f"{indent}}};\n"
-            f"{indent}const dispatchPromise = pluginRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({{"
+            f"{indent}const dispatchPromise = {runtime_name}.channel.reply.dispatchReplyWithBufferedBlockDispatcher({{"
         )
         text = pattern.sub(lambda _m: injection, text, count=1)
 
-    old_deliver_variants = [
-        (
-            'const modelLabel = resolveReplyModelLabel(route.sessionKey, cfg, route.agentId);\n\t\t\t\t\t\t\t\tconst deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel\n\t\t\t\t\t\t\t\t};',
-            'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
-        ),
-        (
-            'const modelLabel = resolveReplyModelLabel(routedSessionKey, cfg, route.agentId);\n\t\t\t\t\t\t\t\tconst deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel\n\t\t\t\t\t\t\t\t};',
-            'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
-        ),
-    ]
     if "modelLabel: currentModelLabel" not in text:
-        for old_deliver, new_deliver in old_deliver_variants:
-            if old_deliver in text:
-                text = text.replace(old_deliver, new_deliver, 1)
-                break
-        else:
-            base_deliver_variants = [
-                (
-                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog\n\t\t\t\t\t\t\t\t};',
-                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
-                ),
-                (
-                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey\n\t\t\t\t\t\t\t\t};',
-                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: routedSessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
-                ),
-                (
-                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey\n\t\t\t\t\t\t\t\t};',
-                    'const deliverActx = {\n\t\t\t\t\t\t\t\t\taccount,\n\t\t\t\t\t\t\t\t\tqualifiedTarget,\n\t\t\t\t\t\t\t\t\tlog,\n\t\t\t\t\t\t\t\t\tsessionKey: route.sessionKey,\n\t\t\t\t\t\t\t\t\tmodelLabel: currentModelLabel\n\t\t\t\t\t\t\t\t};',
-                ),
-            ]
-            for base_deliver, upgraded_deliver in base_deliver_variants:
-                if base_deliver in text:
-                    text = text.replace(base_deliver, upgraded_deliver, 1)
-                    break
-            else:
-                raise RuntimeError("deliverActx anchor missing")
+        deliver_actx_pattern = re.compile(
+            r'const deliverActx = \{\n'
+            r'(?P<indent>[ \t]*)account,\n'
+            r'(?P=indent)qualifiedTarget,\n'
+            r'(?P=indent)log(?:,\n(?P=indent)sessionKey: (?P<session>[^\n,]+))?\n'
+            r'(?P<closing>[ \t]*)\};'
+        )
+        deliver_match = deliver_actx_pattern.search(text)
+        if not deliver_match:
+            raise RuntimeError("deliverActx anchor missing")
+        indent = deliver_match.group("indent")
+        closing_indent = deliver_match.group("closing")
+        existing_session_expr = deliver_match.group("session") or session_key_expr
+        deliver_replacement = (
+            "const deliverActx = {\n"
+            f"{indent}account,\n"
+            f"{indent}qualifiedTarget,\n"
+            f"{indent}log,\n"
+            f"{indent}sessionKey: {existing_session_expr},\n"
+            f"{indent}modelLabel: currentModelLabel\n"
+            f"{closing_indent}}};"
+        )
+        text = deliver_actx_pattern.sub(deliver_replacement, text, count=1)
 
     if "onModelSelected: (selection) => {" not in text:
         old_reply_options = 'replyOptions: { disableBlockStreaming: account.config.streaming?.mode === "off" }'
