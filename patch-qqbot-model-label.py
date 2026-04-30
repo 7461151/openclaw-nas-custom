@@ -414,7 +414,7 @@ def replace_variant_if_needed(text: str, variants: list[tuple[str, str]], marker
 
 def patch_once(text: str) -> str:
     if (
-        f'const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "{PATCH_VERSION}";' in text
+        MARKER in text
         and "const { account, log, modelLabel } = actx;" in text
         and "const { account, qualifiedTarget, log, modelLabel } = actx;" in text
         and "stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);" in text
