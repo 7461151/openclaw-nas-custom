@@ -4,7 +4,7 @@ import re
 
 DIST_DIR = Path("/app/dist")
 MARKER = "OPENCLAW_MODEL_REPLY_PREFIX_PATCH"
-PATCH_VERSION = "2026-04-30.1"
+PATCH_VERSION = "2026-04-30.2"
 HELPER_ANCHORS = [
     "/** Shared helper for sending chunked text replies. */",
     "async function parseAndSendMediaTags(replyText, event, actx, sendWithRetry, consumeQuoteRef, deps) {",
@@ -27,7 +27,7 @@ BASE_SNIPPET_GROUPS = [
     ],
 ]
 
-HELPER_BLOCK = r'''const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "2026-04-30.1";
+HELPER_BLOCK = r'''const OPENCLAW_MODEL_REPLY_PREFIX_PATCH = "2026-04-30.2";
 const OPENCLAW_HOME_DIR = process.env.HOME || "/home/node";
 const OPENCLAW_CONFIG_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "openclaw.json");
 const OPENCLAW_SESSION_STORE_FILE = path.join(OPENCLAW_HOME_DIR, ".openclaw", "agents", "main", "sessions", "sessions.json");
@@ -277,6 +277,12 @@ function buildModelReplyHeader(modelLabel) {
 	if (!normalized) return "";
 	return `\u3010${normalized}\u3011\n`;
 }
+function looksLikeModelReplyHeader(value) {
+	const normalized = normalizeModelRefPart(value);
+	if (!normalized) return false;
+	if (/^[\w.-]+\/[\w.:@+-]+$/i.test(normalized)) return true;
+	return /(?:gpt|claude|sonnet|opus|haiku|qwen|deepseek|doubao|kimi|glm|gemini|mimo|bk|backup|token|model)/i.test(normalized);
+}
 function openclawQqbotShortModelName(fullModel) {
 	const value = normalizeModelRefPart(fullModel);
 	if (!value) return void 0;
@@ -301,11 +307,25 @@ function openclawQqbotCreateResponsePrefixContext(cfg, agentId) {
 }
 function stripLeadingModelReplyHeaders(text) {
 	let stripped = normalizeOptionalString(text) ?? "";
-	stripped = stripped.trimStart();
-	while (stripped.startsWith("\u3010")) {
-		const headerEnd = stripped.indexOf("\u3011");
-		if (headerEnd <= 0 || headerEnd > 61) break;
-		stripped = stripped.slice(headerEnd + 1).trimStart();
+	while (true) {
+		stripped = stripped.trimStart();
+		if (stripped.startsWith("\u3010")) {
+			const headerEnd = stripped.indexOf("\u3011");
+			if (headerEnd <= 0 || headerEnd > 80) break;
+			const header = stripped.slice(1, headerEnd);
+			if (!looksLikeModelReplyHeader(header)) break;
+			stripped = stripped.slice(headerEnd + 1);
+			continue;
+		}
+		if (stripped.startsWith("[")) {
+			const headerEnd = stripped.indexOf("]");
+			if (headerEnd <= 0 || headerEnd > 80) break;
+			const header = stripped.slice(1, headerEnd);
+			if (!looksLikeModelReplyHeader(header)) break;
+			stripped = stripped.slice(headerEnd + 1);
+			continue;
+		}
+		break;
 	}
 	return stripped;
 }
@@ -383,12 +403,12 @@ def find_gateway_file() -> Path:
 
 
 def ensure_helper_block(text: str) -> str:
-    pattern = re.compile(
-        r'const (?:QQBOT_MODEL_LABEL_PATCH|OPENCLAW_MODEL_REPLY_PREFIX_PATCH|OPENCLAW_QQBOT_DYNAMIC_PREFIX_PATCH) = ".*?";\n.*?(?=/\*\* Shared helper for sending chunked text replies\. \*/)',
+    helper_pattern = re.compile(
+        r'const (?:QQBOT_MODEL_LABEL_PATCH|OPENCLAW_MODEL_REPLY_PREFIX_PATCH|OPENCLAW_QQBOT_DYNAMIC_PREFIX_PATCH) = ".*?";\n'
+        r'.*?function stageQQBotLocalMediaUrls\(mediaUrls, log, prefix\) \{\n.*?\n\}\n',
         re.S,
     )
-    if pattern.search(text):
-        return pattern.sub(lambda _m: HELPER_BLOCK + "\n", text, count=1)
+    text = helper_pattern.sub("", text)
     for anchor in HELPER_ANCHORS:
         if anchor in text:
             return text.replace(anchor, HELPER_BLOCK + "\n" + anchor, 1)
@@ -420,6 +440,10 @@ def patch_once(text: str) -> str:
         and "stageQQBotLocalMediaUrls(localMediaToSend, log, prefix);" in text
         and "modelLabel: currentModelLabel" in text
         and "onModelSelected: (selection) => {" in text
+        and f'{MARKER} = "{PATCH_VERSION}"' in text
+        and "looksLikeModelReplyHeader" in text
+        and "responsePrefix: undefined" in text
+        and text.count(f"const {MARKER}") == 1
     ):
         return text
 
@@ -464,9 +488,14 @@ def patch_once(text: str) -> str:
     text = replace_once_if_needed(
         text,
         '\t\tdispatcherOptions: {\n\t\t\tresponsePrefix: messagesConfig.responsePrefix,\n\t\t\tdeliver: async (payload, info) => {',
-        '\t\tdispatcherOptions: {\n\t\t\tresponsePrefix: messagesConfig.responsePrefix,\n\t\t\tresponsePrefixContextProvider: dynamicPrefix.responsePrefixContextProvider,\n\t\t\tdeliver: async (payload, info) => {',
+        '\t\tdispatcherOptions: {\n\t\t\tresponsePrefix: undefined,\n\t\t\tresponsePrefixContextProvider: dynamicPrefix.responsePrefixContextProvider,\n\t\t\tdeliver: async (payload, info) => {',
         "responsePrefixContextProvider: dynamicPrefix.responsePrefixContextProvider",
         "dynamic response prefix provider",
+    )
+    text = text.replace(
+        "\t\t\tresponsePrefix: messagesConfig.responsePrefix,\n\t\t\tresponsePrefixContextProvider: dynamicPrefix.responsePrefixContextProvider,",
+        "\t\t\tresponsePrefix: undefined,\n\t\t\tresponsePrefixContextProvider: dynamicPrefix.responsePrefixContextProvider,",
+        1,
     )
 
     text = replace_variant_if_needed(
