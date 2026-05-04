@@ -33,7 +33,6 @@ RUN apt-get update \
  && update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 
-COPY patch-qqbot-model-label.py /usr/local/bin/patch-qqbot-model-label.py
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
 ENV LC_ALL=zh_CN.UTF-8

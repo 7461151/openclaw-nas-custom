@@ -54,20 +54,6 @@ configure_printer() {
   lpstat -d 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
 }
 
-apply_qqbot_model_label_patch() {
-  if [ ! -f /usr/local/bin/patch-qqbot-model-label.py ]; then
-    log "qqbot model label patch script not found; skipping"
-    return 0
-  fi
-
-  if python3 /usr/local/bin/patch-qqbot-model-label.py >/tmp/qqbot-model-label-patch.out 2>/tmp/qqbot-model-label-patch.err; then
-    cat /tmp/qqbot-model-label-patch.out 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  else
-    log "qqbot model label patch failed"
-    cat /tmp/qqbot-model-label-patch.err 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
-  fi
-}
-
 ensure_qqbot_plugin() {
   if openclaw plugins list 2>/tmp/qqbot-plugin-list.err | grep -qi 'stock:qqbot/index.js\|qqbot.*enabled'; then
     return 0
@@ -132,7 +118,6 @@ PY
 start_cups
 configure_printer
 ensure_qqbot_plugin
-apply_qqbot_model_label_patch
 ensure_browser_config
 
 if [ "$#" -eq 0 ]; then
