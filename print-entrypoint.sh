@@ -77,42 +77,111 @@ ensure_qqbot_plugin() {
 }
 
 patch_qqbot_reply_prefix() {
-  target="/app/extensions/qqbot/src/engine/gateway/outbound-dispatch.ts"
-  marker="OPENCLAW_QQBOT_REPLY_PREFIX_CONTEXT_PATCH"
-
-  if [ ! -f "$target" ]; then
-    log "qqbot reply prefix patch skipped: $target not found"
-    return 0
-  fi
-
-  python3 - "$target" "$marker" <<'PY'
-import sys
+  python3 - <<'PY'
+import re
+import subprocess
 from pathlib import Path
 
-target = Path(sys.argv[1])
-marker = sys.argv[2]
-text = target.read_text(encoding="utf-8")
+RUNTIME_MARKER = "OPENCLAW_QQBOT_REPLY_PREFIX_CONTEXT_PATCH_RUNTIME"
+SOURCE_MARKER = "OPENCLAW_QQBOT_REPLY_PREFIX_CONTEXT_PATCH"
+RUNTIME_ROOT = Path("/home/node/.openclaw/npm/node_modules/@openclaw/qqbot/dist")
+SOURCE_TARGET = Path("/app/extensions/qqbot/src/engine/gateway/outbound-dispatch.ts")
 
-if marker in text:
-    raise SystemExit(0)
 
-original = text
-import_line = 'import type { FinalizedMsgContext } from "openclaw/plugin-sdk/reply-runtime";\n'
-replacement_import = (
-    'import { createReplyPrefixContext } from "openclaw/plugin-sdk/channel-reply-pipeline";\n'
-    + import_line
-)
-if import_line not in text:
-    raise SystemExit("qqbot reply prefix patch failed: reply-runtime import not found")
-text = text.replace(import_line, replacement_import, 1)
+def write_backup(target: Path, original: str, suffix: str) -> None:
+    backup = target.with_suffix(target.suffix + suffix)
+    if not backup.exists():
+        backup.write_text(original, encoding="utf-8")
 
-dispatch_block = """  // ---- Dispatch ----
+
+def patch_runtime(target: Path) -> bool:
+    text = target.read_text(encoding="utf-8")
+    if RUNTIME_MARKER in text:
+        return False
+
+    original = text
+    import_anchor = 'import { implicitMentionKindWhen, resolveInboundMentionDecision } from "openclaw/plugin-sdk/channel-mention-gating";'
+    if "openclaw/plugin-sdk/channel-reply-pipeline" not in text:
+        if import_anchor not in text:
+            raise SystemExit(f"qqbot reply prefix patch failed: runtime import anchor not found in {target}")
+        text = text.replace(
+            import_anchor,
+            'import { createReplyPrefixContext } from "openclaw/plugin-sdk/channel-reply-pipeline";\n'
+            + import_anchor,
+            1,
+        )
+
+    text, count = re.subn(
+        r"const messagesConfig = runtime\.channel\.reply\.resolveEffectiveMessagesConfig\(cfg, inbound\.route\.agentId\);",
+        (
+            'const replyPrefixContext = createReplyPrefixContext({\n'
+            '\t\tcfg,\n'
+            '\t\tchannel: "qqbot",\n'
+            "\t\taccountId: inbound.route.accountId,\n"
+            "\t\tagentId: inbound.route.agentId\n"
+            "\t});\n"
+            "\tconst messagesConfig = { responsePrefix: replyPrefixContext.responsePrefix };\n"
+            f'\tconst {RUNTIME_MARKER} = "2026-05-05.2";\n'
+            f"\tvoid {RUNTIME_MARKER};"
+        ),
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"qqbot reply prefix patch failed: runtime dispatch block not found in {target}")
+
+    text, count = re.subn(
+        r"(dispatcherOptions:\s*\{\s*responsePrefix: messagesConfig\.responsePrefix,\s*)deliver:",
+        r"\1responsePrefixContextProvider: replyPrefixContext.responsePrefixContextProvider,\n\t\t\t\t\t\t\tdeliver:",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"qqbot reply prefix patch failed: runtime dispatcher prefix block not found in {target}")
+
+    text, count = re.subn(
+        r"(replyOptions:\s*\{\s*)disableBlockStreaming:",
+        r"\1onModelSelected: replyPrefixContext.onModelSelected,\n\t\t\t\t\t\t\tdisableBlockStreaming:",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"qqbot reply prefix patch failed: runtime replyOptions block not found in {target}")
+
+    write_backup(target, original, ".bak-openclaw-prefix-runtime")
+    target.write_text(text, encoding="utf-8")
+    check = subprocess.run(["node", "--check", str(target)], capture_output=True, text=True)
+    if check.returncode != 0:
+        target.write_text(original, encoding="utf-8")
+        raise SystemExit(check.stderr or check.stdout or f"qqbot reply prefix patch failed: node --check failed for {target}")
+    print(f"patched runtime {target}")
+    return True
+
+
+def patch_source(target: Path) -> bool:
+    if not target.exists():
+        return False
+    text = target.read_text(encoding="utf-8")
+    if SOURCE_MARKER in text:
+        return False
+
+    original = text
+    import_line = 'import type { FinalizedMsgContext } from "openclaw/plugin-sdk/reply-runtime";\n'
+    replacement_import = (
+        'import { createReplyPrefixContext } from "openclaw/plugin-sdk/channel-reply-pipeline";\n'
+        + import_line
+    )
+    if import_line not in text:
+        raise SystemExit("qqbot reply prefix patch failed: source reply-runtime import not found")
+    text = text.replace(import_line, replacement_import, 1)
+
+    dispatch_block = """  // ---- Dispatch ----
   const messagesConfig = runtime.channel.reply.resolveEffectiveMessagesConfig(
     cfg,
     inbound.route.agentId,
   );
 """
-replacement_dispatch_block = f"""  // ---- Dispatch ----
+    replacement_dispatch_block = f"""  // ---- Dispatch ----
   const replyPrefixContext = createReplyPrefixContext({{
     cfg,
     channel: "qqbot",
@@ -120,38 +189,49 @@ replacement_dispatch_block = f"""  // ---- Dispatch ----
     agentId: inbound.route.agentId,
   }});
   const messagesConfig = {{ responsePrefix: replyPrefixContext.responsePrefix }};
-  const {marker} = "2026-05-05.1";
-  void {marker};
+  const {SOURCE_MARKER} = "2026-05-05.1";
+  void {SOURCE_MARKER};
 """
-if dispatch_block not in text:
-    raise SystemExit("qqbot reply prefix patch failed: dispatch config block not found")
-text = text.replace(dispatch_block, replacement_dispatch_block, 1)
+    if dispatch_block not in text:
+        raise SystemExit("qqbot reply prefix patch failed: source dispatch config block not found")
+    text = text.replace(dispatch_block, replacement_dispatch_block, 1)
 
-dispatcher_prefix = """              responsePrefix: messagesConfig.responsePrefix,
+    dispatcher_prefix = """              responsePrefix: messagesConfig.responsePrefix,
               deliver: async (payload: ReplyDeliverPayload, info: { kind: string }) => {
 """
-replacement_dispatcher_prefix = """              responsePrefix: messagesConfig.responsePrefix,
+    replacement_dispatcher_prefix = """              responsePrefix: messagesConfig.responsePrefix,
               responsePrefixContextProvider: replyPrefixContext.responsePrefixContextProvider,
               deliver: async (payload: ReplyDeliverPayload, info: { kind: string }) => {
 """
-if dispatcher_prefix not in text:
-    raise SystemExit("qqbot reply prefix patch failed: dispatcher prefix block not found")
-text = text.replace(dispatcher_prefix, replacement_dispatcher_prefix, 1)
+    if dispatcher_prefix not in text:
+        raise SystemExit("qqbot reply prefix patch failed: source dispatcher prefix block not found")
+    text = text.replace(dispatcher_prefix, replacement_dispatcher_prefix, 1)
 
-reply_options = "            replyOptions: {\n"
-if reply_options not in text:
-    raise SystemExit("qqbot reply prefix patch failed: replyOptions block not found")
-text = text.replace(
-    reply_options,
-    reply_options + "              onModelSelected: replyPrefixContext.onModelSelected,\n",
-    1,
-)
+    reply_options = "            replyOptions: {\n"
+    if reply_options not in text:
+        raise SystemExit("qqbot reply prefix patch failed: source replyOptions block not found")
+    text = text.replace(
+        reply_options,
+        reply_options + "              onModelSelected: replyPrefixContext.onModelSelected,\n",
+        1,
+    )
 
-backup = target.with_suffix(target.suffix + ".bak-openclaw-prefix")
-if not backup.exists():
-    backup.write_text(original, encoding="utf-8")
-target.write_text(text, encoding="utf-8")
-print(f"patched {target}")
+    write_backup(target, original, ".bak-openclaw-prefix")
+    target.write_text(text, encoding="utf-8")
+    print(f"patched source {target}")
+    return True
+
+
+patched_any = False
+runtime_targets = sorted(RUNTIME_ROOT.glob("gateway-*.js")) if RUNTIME_ROOT.exists() else []
+for target in runtime_targets:
+    patched_any = patch_runtime(target) or patched_any
+patched_any = patch_source(SOURCE_TARGET) or patched_any
+
+if not runtime_targets and not SOURCE_TARGET.exists():
+    raise SystemExit("qqbot reply prefix patch skipped: no QQBot runtime or source target found")
+if not patched_any:
+    print("qqbot reply prefix patch already present")
 PY
   status=$?
   if [ "$status" -eq 0 ]; then
