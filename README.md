@@ -4,7 +4,7 @@ This repository publishes a custom OpenClaw image for NAS use.
 
 It keeps the current NAS customizations:
 
-- QQ reply model-name prefix patch
+- official OpenClaw QQBot behavior, without runtime QQBot patches
 - built-in Chromium for standalone browser automation
 - GitHub CLI support (`gh`)
 - password-based SSH automation support (`sshpass`)
@@ -14,6 +14,8 @@ It keeps the current NAS customizations:
 
 Removed from this custom image:
 
+- runtime QQBot model-label and response-prefix patches
+- automatic global `@openclaw/qqbot` installation
 - Gemini CLI integration and OAuth sync helpers
 - Weixin-specific runtime expectations
 - obsolete control-ui delivery model patch
@@ -34,8 +36,7 @@ The image is published to:
 - `Dockerfile`: image build definition
 - `docker-compose.yaml`: NAS deployment file using the published GHCR image
 - `compose.build.local.yaml`: original local-build compose file for debugging
-- `print-entrypoint.sh`: printer setup and model-label patch bootstrap
-- `patch-qqbot-model-label.py`: runtime QQ model-label patch
+- `print-entrypoint.sh`: printer setup and browser-default bootstrap
 - headless Chromium defaults are auto-filled into `~/.openclaw/openclaw.json` on container start when missing
 
 ## NAS Update Flow

@@ -20,4 +20,3 @@ services:
       PRINTER_PPD: /usr/share/ppd/Epson/epson-inkjet-printer-escpr/Epson-L6260_Series-epson-escpr2-en.ppd.gz
     volumes:
       - /volume1/openclaw:/home/node/.openclaw
-      - /volume2/docker/openclaw/patch-qqbot-model-label.py:/usr/local/bin/patch-qqbot-model-label.py:ro
