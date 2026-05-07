@@ -54,6 +54,104 @@ configure_printer() {
   lpstat -d 2>/dev/null | while IFS= read -r line; do log "$line"; done || true
 }
 
+patch_qqbot_dynamic_response_prefix() {
+  python3 - <<'PY'
+import re
+import subprocess
+from pathlib import Path
+
+MARKER = "OPENCLAW_QQBOT_DYNAMIC_RESPONSE_PREFIX_PATCH"
+RUNTIME_ROOT = Path("/home/node/.openclaw/npm/node_modules/@openclaw/qqbot/dist")
+
+
+def patch_runtime(target: Path) -> bool:
+    text = target.read_text(encoding="utf-8")
+    if MARKER in text:
+        return False
+
+    original = text
+    import_anchor = 'import { implicitMentionKindWhen, resolveInboundMentionDecision } from "openclaw/plugin-sdk/channel-mention-gating";'
+    if "openclaw/plugin-sdk/channel-reply-pipeline" not in text:
+        if import_anchor not in text:
+            raise RuntimeError(f"dynamic prefix import anchor not found in {target}")
+        text = text.replace(
+            import_anchor,
+            'import { createReplyPrefixContext } from "openclaw/plugin-sdk/channel-reply-pipeline";\n'
+            + import_anchor,
+            1,
+        )
+
+    text, count = re.subn(
+        r"const messagesConfig = runtime\.channel\.reply\.resolveEffectiveMessagesConfig\(cfg, inbound\.route\.agentId\);",
+        (
+            'const replyPrefixContext = createReplyPrefixContext({\n'
+            '\t\tcfg,\n'
+            '\t\tchannel: "qqbot",\n'
+            "\t\taccountId: inbound.route.accountId,\n"
+            "\t\tagentId: inbound.route.agentId\n"
+            "\t});\n"
+            "\tconst messagesConfig = { responsePrefix: replyPrefixContext.responsePrefix };\n"
+            f'\tconst {MARKER} = "2026-05-07.1";\n'
+            f"\tvoid {MARKER};"
+        ),
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise RuntimeError(f"dynamic prefix dispatch block not found in {target}")
+
+    text, count = re.subn(
+        r"(dispatcherOptions:\s*\{\s*responsePrefix: messagesConfig\.responsePrefix,\s*)deliver:",
+        r"\1responsePrefixContextProvider: replyPrefixContext.responsePrefixContextProvider,\n\t\t\t\t\t\t\tdeliver:",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise RuntimeError(f"dynamic prefix dispatcher options block not found in {target}")
+
+    text, count = re.subn(
+        r"(replyOptions:\s*\{\s*)disableBlockStreaming:",
+        r"\1onModelSelected: replyPrefixContext.onModelSelected,\n\t\t\t\t\t\t\tdisableBlockStreaming:",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise RuntimeError(f"dynamic prefix replyOptions block not found in {target}")
+
+    target.write_text(text, encoding="utf-8")
+    check = subprocess.run(["node", "--check", str(target)], capture_output=True, text=True)
+    if check.returncode != 0:
+        target.write_text(original, encoding="utf-8")
+        raise RuntimeError(check.stderr or check.stdout or f"node --check failed for {target}")
+    print(f"patched {target}")
+    return True
+
+
+if not RUNTIME_ROOT.exists():
+    print("qqbot dynamic response prefix patch skipped: official qqbot plugin not installed")
+    raise SystemExit(0)
+
+targets = sorted(RUNTIME_ROOT.glob("gateway-*.js"))
+if not targets:
+    print("qqbot dynamic response prefix patch skipped: no gateway runtime found")
+    raise SystemExit(0)
+
+patched_any = False
+for target in targets:
+    patched_any = patch_runtime(target) or patched_any
+
+if not patched_any:
+    print("qqbot dynamic response prefix patch already present")
+PY
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    log "qqbot dynamic response prefix patch ensured"
+  else
+    log "qqbot dynamic response prefix patch failed; continuing without dynamic prefix"
+  fi
+  return 0
+}
+
 ensure_browser_config() {
   config_path="/home/node/.openclaw/openclaw.json"
 
@@ -95,6 +193,7 @@ PY
 
 start_cups
 configure_printer
+patch_qqbot_dynamic_response_prefix
 ensure_browser_config
 
 if [ "$#" -eq 0 ]; then
