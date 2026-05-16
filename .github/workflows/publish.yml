@@ -78,14 +78,18 @@ jobs:
           fi
 
           if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
-            if [[ -z "${current_base_digest}" ]]; then
+            if [[ -n "${upstream_version}" && -n "${current_upstream_version}" ]]; then
+              if [[ "${current_upstream_version}" != "${upstream_version}" ]]; then
+                should_build=true
+                build_reason="schedule:upstream-version-changed"
+              else
+                build_reason="schedule:no-upstream-version-change"
+              fi
+            elif [[ -z "${current_base_digest}" ]]; then
               should_build=true
               build_reason="schedule:missing-current-base-digest"
-            elif [[ -n "${upstream_digest}" && "${current_base_digest}" != "${upstream_digest}" ]]; then
-              should_build=true
-              build_reason="schedule:upstream-digest-changed"
             else
-              build_reason="schedule:no-upstream-change"
+              build_reason="schedule:version-check-unavailable"
             fi
           fi
 
